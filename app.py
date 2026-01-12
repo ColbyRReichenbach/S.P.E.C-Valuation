@@ -17,6 +17,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+import pydeck as pdk
 
 # Add project root to path
 import sys
@@ -59,6 +60,14 @@ def inject_custom_css():
     """Inject custom CSS for the finance-grade dark theme."""
     st.markdown(f"""
     <style>
+        /* Import professional font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        /* Global font */
+        html, body, [class*="css"] {{
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }}
+        
         /* Main background */
         .stApp {{
             background-color: {COLORS.BG_PRIMARY};
@@ -67,18 +76,37 @@ def inject_custom_css():
         /* Sidebar */
         [data-testid="stSidebar"] {{
             background-color: {COLORS.BG_SECONDARY};
+            border-right: 1px solid {COLORS.BG_TERTIARY};
         }}
         
         /* Cards and containers */
         .stMetric {{
-            background-color: {COLORS.BG_TERTIARY};
-            padding: 1rem;
-            border-radius: 0.5rem;
+            background-color: {COLORS.BG_SECONDARY};
+            padding: 1.25rem;
+            border-radius: 8px;
+            border: 1px solid {COLORS.BG_TERTIARY};
         }}
         
         /* Headers */
-        h1, h2, h3 {{
+        h1 {{
             color: {COLORS.TEXT_PRIMARY};
+            font-weight: 600;
+            letter-spacing: -0.025em;
+        }}
+        
+        h2, h3 {{
+            color: {COLORS.TEXT_PRIMARY};
+            font-weight: 500;
+            letter-spacing: -0.01em;
+        }}
+        
+        h4 {{
+            color: {COLORS.TEXT_SECONDARY};
+            font-weight: 500;
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 1.5rem;
         }}
         
         /* Text */
@@ -88,30 +116,36 @@ def inject_custom_css():
         
         /* Metric values */
         [data-testid="stMetricValue"] {{
+            color: {COLORS.TEXT_PRIMARY};
+            font-weight: 600;
+        }}
+        
+        [data-testid="stMetricDelta"] {{
             color: {COLORS.EMERALD_GREEN};
         }}
         
         /* Custom metric card */
         .metric-card {{
-            background: linear-gradient(135deg, {COLORS.BG_SECONDARY} 0%, {COLORS.BG_TERTIARY} 100%);
+            background: {COLORS.BG_SECONDARY};
             border: 1px solid {COLORS.BG_TERTIARY};
-            border-radius: 12px;
+            border-radius: 8px;
             padding: 1.5rem;
             text-align: center;
         }}
         
         .metric-card h3 {{
             color: {COLORS.TEXT_MUTED};
-            font-size: 0.875rem;
+            font-size: 0.75rem;
+            font-weight: 500;
             margin-bottom: 0.5rem;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.08em;
         }}
         
         .metric-card .value {{
             color: {COLORS.TEXT_PRIMARY};
-            font-size: 2rem;
-            font-weight: 700;
+            font-size: 1.75rem;
+            font-weight: 600;
         }}
         
         .metric-card .delta {{
@@ -129,31 +163,54 @@ def inject_custom_css():
         
         /* Undervalued/Overvalued badges */
         .badge-undervalued {{
-            background-color: {COLORS.EMERALD_GREEN}20;
+            background-color: {COLORS.EMERALD_GREEN}15;
             color: {COLORS.EMERALD_GREEN};
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            font-weight: 600;
+            padding: 0.35rem 0.85rem;
+            border-radius: 4px;
+            font-weight: 500;
+            font-size: 0.8rem;
+            letter-spacing: 0.02em;
         }}
         
         .badge-overvalued {{
-            background-color: {COLORS.CRIMSON_RED}20;
+            background-color: {COLORS.CRIMSON_RED}15;
             color: {COLORS.CRIMSON_RED};
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            font-weight: 600;
+            padding: 0.35rem 0.85rem;
+            border-radius: 4px;
+            font-weight: 500;
+            font-size: 0.8rem;
+            letter-spacing: 0.02em;
         }}
         
         /* Expander styling */
         .streamlit-expanderHeader {{
-            background-color: {COLORS.BG_TERTIARY};
-            border-radius: 0.5rem;
+            background-color: {COLORS.BG_SECONDARY};
+            border-radius: 4px;
+            font-size: 0.85rem;
         }}
         
         /* Code blocks */
         code {{
             background-color: {COLORS.BG_TERTIARY};
             color: {COLORS.CHART_CYAN};
+            font-size: 0.85rem;
+        }}
+        
+        /* Dividers */
+        hr {{
+            border-color: {COLORS.BG_TERTIARY};
+            opacity: 0.5;
+        }}
+        
+        /* Selectbox and inputs */
+        .stSelectbox > div > div {{
+            background-color: {COLORS.BG_SECONDARY};
+            border-color: {COLORS.BG_TERTIARY};
+        }}
+        
+        /* Radio buttons */
+        .stRadio > div {{
+            gap: 0.5rem;
         }}
     </style>
     """, unsafe_allow_html=True)
@@ -347,12 +404,12 @@ def main():
     # HEADER
     # ================================
     st.markdown("""
-    <div style="text-align: center; padding: 1rem 0 2rem 0;">
-        <h1 style="font-size: 2.5rem; margin-bottom: 0.5rem;">
-            🏠 S.P.E.C. Valuation Engine
+    <div style="text-align: center; padding: 1.5rem 0 2.5rem 0;">
+        <h1 style="font-size: 2.25rem; font-weight: 600; margin-bottom: 0.5rem; letter-spacing: -0.025em;">
+            S.P.E.C. Valuation Engine
         </h1>
-        <p style="font-size: 1.1rem; color: #A0A4AB;">
-            <strong>S</strong>patial • <strong>P</strong>redictive • <strong>E</strong>xplainable • <strong>C</strong>onversational
+        <p style="font-size: 0.95rem; color: #6B7280; letter-spacing: 0.1em; text-transform: uppercase;">
+            Spatial · Predictive · Explainable · Conversational
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -371,7 +428,7 @@ def main():
     # ================================
     # MARKET PULSE (Header Metrics)
     # ================================
-    st.markdown("### 📊 The Market Pulse")
+    st.markdown("### Market Pulse")
     
     metrics = get_market_metrics()
     
@@ -383,7 +440,7 @@ def main():
             value=f"{metrics['avg_days_on_market']:.0f} days",
             delta="-5 vs last month",
         )
-        with st.expander("📄 View SQL Query"):
+        with st.expander("View SQL Query"):
             st.code(metrics["query_dom"], language="sql")
     
     with col2:
@@ -392,7 +449,7 @@ def main():
             value=f"${metrics['total_volume'] / 1_000_000:.1f}M",
             delta=f"{metrics['total_listings']} listings",
         )
-        with st.expander("📄 View SQL Query"):
+        with st.expander("View SQL Query"):
             st.code(metrics["query_volume"], language="sql")
     
     with col3:
@@ -401,7 +458,7 @@ def main():
             value=f"${metrics['avg_price']:,.0f}",
             delta="+3.2% YoY",
         )
-        with st.expander("📄 View SQL Query"):
+        with st.expander("View SQL Query"):
             st.code(metrics["query_zip"], language="sql")
     
     st.markdown("---")
@@ -415,7 +472,7 @@ def main():
     # LEFT COLUMN: THE SCREENER
     # ================================
     with left_col:
-        st.markdown("### 🔍 The Screener")
+        st.markdown("### Property Screener")
         
         # Filters
         st.markdown("#### Filters")
@@ -464,11 +521,38 @@ def main():
         
         if len(filtered_df) > 0:
             # Prepare map data with colors
-            map_df = prepare_map_data(filtered_df)
+            map_df = prepare_map_data(filtered_df).copy()
             
-            # Add color column for visualization context
-            # Note: st.map doesn't support colors, but we show the data
-            st.map(map_df[["lat", "lon"]], use_container_width=True)
+            # Add RGB color column based on valuation status
+            # Green (0, 212, 126) for Undervalued, Red (255, 71, 87) for Overvalued
+            map_df["color"] = map_df["valuation_status"].apply(
+                lambda x: [0, 212, 126, 180] if x == "Undervalued" else [255, 71, 87, 180]
+            )
+            
+            # Create pydeck layer with colored markers
+            layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=map_df,
+                get_position=["lon", "lat"],
+                get_color="color",
+                get_radius=150,
+                pickable=True,
+            )
+            
+            # Set initial view state
+            view_state = pdk.ViewState(
+                latitude=map_df["lat"].mean(),
+                longitude=map_df["lon"].mean(),
+                zoom=11,
+                pitch=0,
+            )
+            
+            # Render the map
+            st.pydeck_chart(pdk.Deck(
+                layers=[layer],
+                initial_view_state=view_state,
+                map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+            ))
             
             # Legend
             st.markdown(f"""
@@ -505,7 +589,7 @@ def main():
     # RIGHT COLUMN: THE INSPECTOR
     # ================================
     with right_col:
-        st.markdown("### 🔬 The Inspector")
+        st.markdown("### Property Analysis")
         
         if selected_property is not None:
             # Property Details Card
@@ -544,7 +628,7 @@ def main():
             # ================================
             # WATERFALL CHART (SHAP)
             # ================================
-            st.markdown("#### 📊 Valuation Breakdown (White Box)")
+            st.markdown("#### Valuation Breakdown")
             
             explanation = model.explain(
                 sqft=selected_property["sqft"],
@@ -559,7 +643,7 @@ def main():
             # ================================
             # RENOVATION SIMULATOR
             # ================================
-            st.markdown("#### 🔧 Renovation Simulator")
+            st.markdown("#### Renovation Simulator")
             st.caption("Adjust property features to see how value changes in real-time.")
             
             sim_col1, sim_col2 = st.columns(2)
@@ -615,7 +699,7 @@ def main():
             # ================================
             # AI INVESTMENT MEMO
             # ================================
-            st.markdown("#### 🤖 AI Investment Memo")
+            st.markdown("#### Investment Analysis")
             
             with st.spinner("Generating analysis..."):
                 memo = generate_investment_memo(
@@ -624,19 +708,19 @@ def main():
                     zip_code=selected_property["zip_code"],
                 )
             
-            st.markdown(memo)
+            st.markdown(memo, unsafe_allow_html=True)
         
         else:
-            st.info("👈 Select a property from the Screener to analyze.")
+            st.info("Select a property from the Screener to view detailed analysis.")
     
     # ================================
     # FOOTER
     # ================================
     st.markdown("---")
     st.markdown("""
-    <div style="text-align: center; color: #6B7280; font-size: 0.875rem;">
-        <p>S.P.E.C. Valuation Engine v1.0 | Built for Real Estate Analysts</p>
-        <p>⚠️ Model predictions are for demonstration purposes only. Not financial advice.</p>
+    <div style="text-align: center; color: #4B5563; font-size: 0.8rem; padding: 1rem 0;">
+        <p style="margin-bottom: 0.25rem;">S.P.E.C. Valuation Engine v1.0</p>
+        <p style="color: #6B7280;">Model predictions are for demonstration purposes only. Not financial advice.</p>
     </div>
     """, unsafe_allow_html=True)
 

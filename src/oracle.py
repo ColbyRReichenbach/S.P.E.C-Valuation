@@ -319,47 +319,103 @@ def _generate_template_memo(
     positive_drivers = [(f, v) for f, v in sorted_shap if v > 0]
     negative_drivers = [(f, v) for f, v in sorted_shap if v < 0]
     
+    # Calculate price premium/discount
+    price_diff = price - base_value
+    price_diff_pct = (price_diff / base_value) * 100 if base_value > 0 else 0
+    
+    # Determine recommendation based on sentiment
+    if sentiment == "Bullish":
+        recommendation = "CAUTIOUS BUY"
+        rec_color = "#00D47E"
+    elif sentiment == "Bearish":
+        recommendation = "HOLD / AVOID"
+        rec_color = "#FF4757"
+    else:
+        recommendation = "NEUTRAL"
+        rec_color = "#FFB946"
+    
     # Build the memo
-    memo = f"""## 📊 Investment Memo - Simulation Mode
+    memo = f"""
+<div style="background: #1a1d24; border: 1px solid #2d3139; border-radius: 8px; padding: 1.5rem; margin-top: 0.5rem;">
 
-**⚠️ AI Oracle Offline** - Using template analysis. Configure OPENAI_API_KEY for full AI insights.
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #2d3139;">
+    <div>
+        <p style="color: #6B7280; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; margin: 0;">Investment Recommendation</p>
+        <p style="color: {rec_color}; font-size: 1.25rem; font-weight: 600; margin: 0.25rem 0 0 0;">{recommendation}</p>
+    </div>
+    <div style="text-align: right;">
+        <p style="color: #6B7280; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; margin: 0;">Model Confidence</p>
+        <p style="color: #E5E7EB; font-size: 1.25rem; font-weight: 600; margin: 0.25rem 0 0 0;">HIGH</p>
+    </div>
+</div>
 
----
+<div style="margin-bottom: 1.25rem;">
+    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Valuation Summary</p>
+    <p style="color: #D1D5DB; font-size: 0.9rem; line-height: 1.6; margin: 0;">
+        The model values this property at <strong style="color: #fff;">${price:,.0f}</strong>, representing a 
+        <span style="color: {'#00D47E' if price_diff >= 0 else '#FF4757'};">{price_diff_pct:+.1f}%</span> 
+        ({'+' if price_diff >= 0 else ''}{price_diff:,.0f}) deviation from the market baseline of ${base_value:,.0f}. 
+        The valuation is derived from {len(sorted_shap)} key property attributes analyzed via SHAP explainability.
+    </p>
+</div>
 
-### Valuation Summary
-The model values this property at **${price:,.0f}**, which is **${price - base_value:+,.0f}** relative to the market baseline of ${base_value:,.0f}.
-
-### Key Value Drivers
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
+    <div>
+        <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Value Drivers (+)</p>
 """
     
     if positive_drivers:
-        memo += "\n**Positive Factors:**\n"
-        for feat, val in positive_drivers[:2]:
-            memo += f"- {feat.replace('_', ' ').title()}: +${val:,.0f}\n"
+        for feat, val in positive_drivers[:3]:
+            memo += f"""        <p style="color: #00D47E; font-size: 0.85rem; margin: 0.25rem 0;">{feat.replace('_', ' ').title()}: +${val:,.0f}</p>\n"""
+    else:
+        memo += """        <p style="color: #6B7280; font-size: 0.85rem; margin: 0.25rem 0;">No positive drivers identified</p>\n"""
+    
+    memo += """    </div>
+    <div>
+        <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Value Detractors (-)</p>
+"""
     
     if negative_drivers:
-        memo += "\n**Negative Factors:**\n"
-        for feat, val in negative_drivers[:2]:
-            memo += f"- {feat.replace('_', ' ').title()}: ${val:,.0f}\n"
+        for feat, val in negative_drivers[:3]:
+            memo += f"""        <p style="color: #FF4757; font-size: 0.85rem; margin: 0.25rem 0;">{feat.replace('_', ' ').title()}: ${val:,.0f}</p>\n"""
+    else:
+        memo += """        <p style="color: #6B7280; font-size: 0.85rem; margin: 0.25rem 0;">No negative drivers identified</p>\n"""
     
-    memo += f"""
-### Market Context - {neighborhood}
-**Current Sentiment:** {sentiment}
+    memo += f"""    </div>
+</div>
 
-**Local News:**
+<div style="margin-bottom: 1.25rem; padding: 1rem; background: #12141a; border-radius: 6px;">
+    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Market Context: {neighborhood}</p>
+    <div style="display: flex; gap: 2rem; margin-bottom: 0.75rem;">
+        <div>
+            <span style="color: #6B7280; font-size: 0.75rem;">Sentiment</span>
+            <p style="color: {'#00D47E' if sentiment == 'Bullish' else '#FF4757' if sentiment == 'Bearish' else '#FFB946'}; font-size: 0.9rem; font-weight: 500; margin: 0.125rem 0 0 0;">{sentiment}</p>
+        </div>
+    </div>
+    <p style="color: #6B7280; font-size: 0.75rem; margin: 0.5rem 0 0.25rem 0;">Recent Developments:</p>
 """
     for news in market_context["news"][:2]:
-        memo += f"- {news}\n"
+        memo += f"""    <p style="color: #9CA3AF; font-size: 0.8rem; margin: 0.2rem 0; padding-left: 0.75rem; border-left: 2px solid #2d3139;">{news}</p>\n"""
     
-    memo += f"""
-### Risk Assessment
+    memo += f"""</div>
+
+<div style="margin-bottom: 1rem;">
+    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Risk Factors</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
 """
     for risk in market_context["risk_factors"]:
-        memo += f"- ⚠️ {risk}\n"
+        memo += f"""        <span style="background: #FF475715; color: #FF4757; padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.75rem;">{risk}</span>\n"""
     
-    memo += """
----
-*This is a simulated analysis. Enable AI for comprehensive investment insights.*
+    memo += """    </div>
+</div>
+
+<div style="padding-top: 1rem; border-top: 1px solid #2d3139;">
+    <p style="color: #4B5563; font-size: 0.7rem; font-style: italic; margin: 0;">
+        Analysis generated via template engine. Configure OPENAI_API_KEY for AI-powered insights.
+    </p>
+</div>
+
+</div>
 """
     
     return memo

@@ -1,222 +1,140 @@
 # S.P.E.C. Valuation Engine
 
-![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.29+-red.svg)
-![XGBoost](https://img.shields.io/badge/XGBoost-2.0+-green.svg)
-![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+**Spatial · Predictive · Explainable · Conversational**
 
-> **Spatial • Predictive • Explainable • Conversational**
+A full-stack Automated Valuation Model (AVM) for residential real estate, featuring machine learning price prediction, SHAP-based explainability, and LLM-powered investment analysis.
 
-A professional-grade Automated Valuation Model (AVM) dashboard for Real Estate Analysts. This tool bridges the gap between "Black Box" ML predictions and "White Box" explainability.
-
----
-
-## 🎯 Overview
-
-The S.P.E.C. Valuation Engine is an internal tool designed to help analysts validate AVM predictions with full transparency. It combines:
-
-- **Spatial Analysis**: Interactive property maps with valuation overlays
-- **Predictive Models**: XGBoost-powered price predictions
-- **Explainability**: SHAP-based feature attribution (the "Why" behind predictions)
-- **Conversational AI**: GPT-powered investment memo generation
+![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=flat&logo=python&logoColor=white)
+![XGBoost](https://img.shields.io/badge/XGBoost-ML-FF6600?style=flat)
+![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?style=flat&logo=streamlit&logoColor=white)
+![SHAP](https://img.shields.io/badge/SHAP-Explainability-6C5CE7?style=flat)
 
 ---
 
-## 🏗️ Architecture
+## Project Overview
+
+This project demonstrates an end-to-end data science workflow: from ETL pipeline and feature engineering to model training, interpretability, and deployment as an interactive dashboard. The system identifies undervalued and overvalued properties by comparing list prices against ML predictions, with full transparency into the pricing drivers.
+
+**Key Capabilities:**
+- XGBoost regression model for property valuation
+- SHAP TreeExplainer for feature attribution and model transparency
+- Interactive geospatial visualization with color-coded valuation status
+- Real-time "what-if" renovation simulator
+- LLM-generated investment memos with market context
+
+---
+
+## Technical Stack
+
+| Layer | Technology |
+|-------|------------|
+| Machine Learning | XGBoost, scikit-learn, SHAP |
+| Data Processing | Pandas, NumPy, SQLite, Parquet |
+| Visualization | Plotly, Pydeck, Streamlit |
+| LLM Integration | OpenAI API (GPT-4o-mini) |
+| Frontend | Streamlit with custom CSS |
+
+---
+
+## Architecture
 
 ```
 spec-valuation-engine/
-├── .gitignore               # Security: blocks secrets and data
-├── .env.example             # Template for API keys
-├── requirements.txt         # Python dependencies
-├── README.md                # This file
+├── app.py                 # Streamlit dashboard application
 ├── config/
-│   └── settings.py          # Colors, paths, constants
-├── data/
-│   ├── raw/                 # Source CSVs (gitignored)
-│   └── processed/           # Parquet & SQLite
+│   └── settings.py        # Configuration and constants
 ├── src/
-│   ├── __init__.py
-│   ├── etl.py               # ETL pipeline
-│   ├── model.py             # XGBoost + SHAP
-│   ├── spatial.py           # Geospatial utilities
-│   └── oracle.py            # AI/LLM integration
-├── assets/
-│   └── model.pkl            # Trained model (gitignored)
-└── app.py                   # Streamlit frontend
+│   ├── etl.py             # Data pipeline (extract, transform, load)
+│   ├── model.py           # XGBoost training + SHAP explainability
+│   ├── spatial.py         # Geospatial utilities
+│   └── oracle.py          # LLM integration for investment memos
+├── data/
+│   └── processed/         # Parquet and SQLite outputs
+└── assets/
+    └── model.pkl          # Serialized trained model
 ```
 
 ---
 
-## 🚀 Quick Start
+## Data Pipeline
 
-### 1. Clone & Setup Environment
+The ETL module generates synthetic San Francisco Bay Area housing data for demonstration, then processes it through a standard pipeline:
+
+1. **Extract**: Load raw property records
+2. **Transform**: Normalize column names, handle missing values, engineer features
+3. **Load**: Persist to Parquet (analytics) and SQLite (SQL queries)
+
+Data schema includes: `lat`, `lon`, `price`, `sqft`, `bedrooms`, `year_built`, `condition`, `zip_code`, `days_on_market`
+
+---
+
+## Model Training & Explainability
+
+**Algorithm**: XGBoost Regressor with hyperparameter tuning
+
+**Features**:
+- Square footage
+- Bedroom count
+- Year built
+- Condition rating (1-5)
+
+**Explainability**: SHAP TreeExplainer computes feature attributions for each prediction, enabling a waterfall visualization that breaks down how each feature contributes to the final price estimate.
+
+```python
+# Example: Get prediction with explanation
+model = ValuationModel()
+explanation = model.explain(sqft=2000, bedrooms=3, year_built=1985, condition=4)
+# Returns: base_value, shap_values per feature, predicted_price
+```
+
+---
+
+## Dashboard Features
+
+| Section | Description |
+|---------|-------------|
+| **Market Pulse** | Aggregate metrics via SQL queries (avg days on market, total volume, avg price) |
+| **Property Screener** | Filter by price, zip code, valuation status; interactive map with color-coded markers |
+| **Valuation Breakdown** | SHAP waterfall chart showing price decomposition |
+| **Renovation Simulator** | Adjust property features and see real-time value predictions |
+| **Investment Analysis** | AI-generated memo with market context, risk factors, and recommendation |
+
+---
+
+## Getting Started
 
 ```bash
-# Navigate to project
+# Clone and navigate to project
 cd spec-valuation-engine
 
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Configure API Keys (Optional)
-
-For AI-powered investment memos:
-
-```bash
-# Copy the example env file
-cp .env.example .env
-
-# Edit .env and add your OpenAI API key
-# OPENAI_API_KEY=sk-...
-```
-
-> ⚠️ **Note**: The app works without an API key (uses template memos instead).
-
-### 3. Run the Application
-
-```bash
+# Run the application
 streamlit run app.py
 ```
 
-The app will:
-1. Generate synthetic housing data (if none exists)
-2. Train the XGBoost model (first run only)
-3. Launch the dashboard at `http://localhost:8501`
+The first run will generate synthetic data and train the model. Subsequent runs use cached artifacts.
 
----
-
-## 📊 Features
-
-### Market Pulse (Header)
-Three key metrics computed via **raw SQL queries**:
-- Average Days on Market
-- Total Market Volume
-- Average Price
-
-SQL queries are viewable in expandable sections to demonstrate data skills.
-
-### The Screener (Left Panel)
-- **Filters**: Price range, Zip code, Valuation status
-- **Interactive Map**: Property locations with valuation context
-- **Property List**: Sortable, filterable property selection
-
-### The Inspector (Right Panel)
-- **Waterfall Chart**: SHAP-based price decomposition
-- **Renovation Simulator**: Real-time value prediction as you adjust features
-- **AI Memo**: GPT-generated bearish investment analysis
-
----
-
-## 🔧 Technical Details
-
-### Data Pipeline (ETL)
-- Generates realistic synthetic SF Bay Area housing data
-- Cleans column names to snake_case
-- Persists to Parquet (fast loading) and SQLite (SQL queries)
-
-### Valuation Model
-- **Algorithm**: XGBoost Regressor
-- **Features**: sqft, bedrooms, year_built, condition
-- **Explainability**: SHAP TreeExplainer for feature attribution
-- **Persistence**: Pickled model avoids retraining
-
-### AI Oracle
-- **Provider**: OpenAI GPT-4o-mini (configurable)
-- **Persona**: Bearish Investment Analyst
-- **Fallback**: Template-based memos when API unavailable
-- **Context**: Mock news database per zip code
-
----
-
-## 🎨 Design System
-
-Finance-grade dark theme:
-
-| Token | Color | Usage |
-|-------|-------|-------|
-| BG_PRIMARY | `#1A1D23` | Main background |
-| BG_SECONDARY | `#22262E` | Cards, panels |
-| EMERALD_GREEN | `#00D47E` | Profit, undervalued |
-| CRIMSON_RED | `#FF4757` | Risk, overvalued |
-| TEXT_PRIMARY | `#FFFFFF` | Headers |
-| TEXT_SECONDARY | `#A0A4AB` | Body text |
-
----
-
-## 📁 Data Schema
-
-### `sales` Table (SQLite)
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Unique identifier |
-| lat | REAL | Latitude |
-| lon | REAL | Longitude |
-| price | INTEGER | List price ($) |
-| sqft | INTEGER | Square footage |
-| bedrooms | INTEGER | Number of bedrooms |
-| year_built | INTEGER | Construction year |
-| zip_code | TEXT | Zip code |
-| condition | INTEGER | 1-5 rating |
-| days_on_market | INTEGER | Days listed |
-
----
-
-## 🔒 Security
-
-- API keys loaded from `.env` (never committed)
-- `.gitignore` blocks secrets, data, and model files
-- Graceful fallback when API unavailable
-
----
-
-## 🧪 Testing
-
-Run the ETL pipeline:
-```bash
-python -m src.etl
+**Optional**: Add your OpenAI API key to `.env` for AI-powered investment memos:
 ```
-
-Test the model:
-```bash
-python -m src.model
-```
-
-Test the oracle:
-```bash
-python -m src.oracle
+OPENAI_API_KEY=sk-...
 ```
 
 ---
 
-## 📈 Performance
+## Performance Optimizations
 
-- **Target**: Dashboard loads in < 3 seconds
-- **Caching**: `@st.cache_data` for data, `@st.cache_resource` for model
-- **Data Format**: Parquet for fast columnar access
-
----
-
-## 📝 License
-
-MIT License - See LICENSE file for details.
+- **Caching**: Streamlit's `@st.cache_data` and `@st.cache_resource` decorators minimize redundant computation
+- **Data Format**: Parquet for fast columnar reads
+- **Model Persistence**: Pickled model avoids retraining on each session
 
 ---
 
-## 🤝 Contributing
+## License
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run linting: `ruff check .`
-5. Submit a pull request
-
----
-
-Built with ❤️ for Real Estate Analysts
+MIT License

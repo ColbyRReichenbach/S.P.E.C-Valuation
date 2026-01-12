@@ -20,6 +20,7 @@ shap==0.42.1      # Pinned for pre-built wheel compatibility
 # Visualization
 matplotlib>=3.7.0
 plotly>=5.18.0
+pydeck>=0.8.0
 
 # AI/LLM Integration
 openai>=1.6.0
