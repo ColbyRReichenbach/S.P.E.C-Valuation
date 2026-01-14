@@ -1,0 +1,74 @@
+# ====================================
+# S.P.E.C. Valuation Engine - Docker Compose
+# ====================================
+# Development and production orchestration
+
+version: '3.8'
+
+services:
+  # Main Streamlit application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spec-valuation-engine
+    ports:
+      - "8501:8501"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - RAPIDAPI_KEY=${RAPIDAPI_KEY:-}
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+    volumes:
+      # Persist data between container restarts
+      - ./data:/app/data
+      - ./assets:/app/assets
+      - ./mlruns:/app/mlruns
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8501/_stcore/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Development mode with hot reload
+  app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spec-valuation-dev
+    ports:
+      - "8502:8501"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - RAPIDAPI_KEY=${RAPIDAPI_KEY:-}
+    volumes:
+      # Mount source code for hot reload
+      - ./app.py:/app/app.py
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./assets:/app/assets
+      - ./mlruns:/app/mlruns
+    command: streamlit run app.py --server.runOnSave=true
+    profiles:
+      - dev
+
+  # MLflow tracking server (optional)
+  mlflow:
+    image: python:3.9-slim
+    container_name: spec-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/mlruns
+    command: >
+      /bin/sh -c "pip install mlflow && mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri file:///mlruns"
+    profiles:
+      - mlops
+
+volumes:
+  data:
+  assets:
+  mlruns:

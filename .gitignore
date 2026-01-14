@@ -55,6 +55,12 @@ data/raw/
 *.swo
 .DS_Store
 Thumbs.db
+.agent/
+
+# ----- Generated Assets -----
+assets/*.png
+assets/*.jpg
+assets/*.jpeg
 
 # ----- Streamlit -----
 .streamlit/secrets.toml
@@ -62,3 +68,32 @@ Thumbs.db
 # ----- Logs -----
 *.log
 logs/
+
+# ----- MLflow (Experiment Tracking) -----
+mlruns/
+mlartifacts/
+
+# ----- Tests (Not needed in production) -----
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# ----- Vector Databases & Embeddings -----
+data/vector_db/
+*.chroma/
+chroma_db/
+
+# ----- Jupyter Notebooks -----
+.ipynb_checkpoints/
+*.ipynb
+
+# ----- Large Model Files -----
+*.h5
+*.hdf5
+*.onnx
+*.pt
+*.pth
+*.safetensors

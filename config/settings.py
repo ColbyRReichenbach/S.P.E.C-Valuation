@@ -3,11 +3,13 @@ S.P.E.C. Valuation Engine - Global Configuration
 =================================================
 Centralized settings for colors, paths, and constants.
 Finance-grade dark theme with professional aesthetics.
+V2.0 Production-Grade Configuration
 """
 
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, List
+import datetime
 
 
 # ====================================
@@ -18,12 +20,16 @@ DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 ASSETS_DIR = PROJECT_ROOT / "assets"
+TESTS_DIR = PROJECT_ROOT / "tests"
+VECTOR_DB_DIR = DATA_DIR / "vector_db"
+MLFLOW_DIR = PROJECT_ROOT / "mlruns"
 
 # Specific file paths
 HOUSING_CSV = RAW_DATA_DIR / "housing.csv"
 HOUSING_PARQUET = PROCESSED_DATA_DIR / "housing.parquet"
 DATABASE_PATH = DATA_DIR / "real_estate.db"
 MODEL_PATH = ASSETS_DIR / "model.pkl"
+MARKET_REPORTS_DIR = DATA_DIR / "market_reports"
 
 
 # ====================================
@@ -81,15 +87,34 @@ MAP_ZOOM = 11
 
 
 # ====================================
+# GEOSPATIAL / H3 CONFIGURATION
+# ====================================
+H3_RESOLUTION: int = 9  # Resolution 9 ~= 0.1 km² hexagons
+CITY_CENTER_LAT: float = 37.7749  # San Francisco City Hall
+CITY_CENTER_LON: float = -122.4194
+
+
+# ====================================
 # MODEL CONFIGURATION
 # ====================================
-MODEL_FEATURES = [
+MODEL_FEATURES: List[str] = [
     "sqft",
     "bedrooms",
     "year_built",
     "condition",
 ]
-TARGET_COLUMN = "price"
+
+# Extended features including spatial
+MODEL_FEATURES_V2: List[str] = [
+    "sqft",
+    "bedrooms",
+    "year_built",
+    "condition",
+    "h3_index",
+    "distance_to_center_km",
+]
+
+TARGET_COLUMN: str = "price"
 
 XGBOOST_PARAMS: Dict[str, Any] = {
     "n_estimators": 100,
@@ -97,6 +122,58 @@ XGBOOST_PARAMS: Dict[str, Any] = {
     "learning_rate": 0.1,
     "random_state": 42,
     "n_jobs": -1,
+}
+
+
+# ====================================
+# OPTUNA HYPERPARAMETER SEARCH SPACE
+# ====================================
+OPTUNA_N_TRIALS: int = 50
+OPTUNA_TIMEOUT_SECONDS: int = 600  # 10 minutes max
+
+OPTUNA_SEARCH_SPACE: Dict[str, Any] = {
+    "learning_rate": {"low": 0.01, "high": 0.3, "log": True},
+    "max_depth": {"low": 3, "high": 10},
+    "subsample": {"low": 0.6, "high": 1.0},
+    "n_estimators": {"low": 50, "high": 300},
+    "min_child_weight": {"low": 1, "high": 10},
+    "colsample_bytree": {"low": 0.5, "high": 1.0},
+}
+
+
+# ====================================
+# MLFLOW CONFIGURATION
+# ====================================
+MLFLOW_EXPERIMENT_NAME: str = "spec_valuation_engine"
+MLFLOW_TRACKING_URI: str = str(MLFLOW_DIR)
+
+
+# ====================================
+# RAG / VECTOR STORE CONFIGURATION
+# ====================================
+VECTOR_COLLECTION_NAME: str = "market_reports"
+EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+CHUNK_SIZE: int = 500  # Characters per chunk
+CHUNK_OVERLAP: int = 50  # Overlap between chunks
+TOP_K_RETRIEVAL: int = 3  # Number of chunks to retrieve
+
+
+# ====================================
+# DATA VALIDATION CONSTRAINTS
+# ====================================
+CURRENT_YEAR: int = datetime.datetime.now().year
+
+DATA_VALIDATION_RULES: Dict[str, Any] = {
+    "price_min": 0,
+    "price_max": 100_000_000,
+    "sqft_min": 100,
+    "sqft_max": 50_000,
+    "bedrooms_min": 0,
+    "bedrooms_max": 20,
+    "year_built_min": 1800,
+    "year_built_max": CURRENT_YEAR,
+    "condition_min": 1,
+    "condition_max": 5,
 }
 
 
@@ -113,19 +190,37 @@ CACHE_TTL_MODEL = 86400    # 24 hours for model
 
 
 # ====================================
-# SYNTHETIC DATA GENERATION
+# API CONNECTOR CONFIGURATION
+# ====================================
+API_TIMEOUT_SECONDS: int = 30
+API_RETRY_ATTEMPTS: int = 3
+
+# Zillow API (placeholder - requires real credentials)
+ZILLOW_API_BASE_URL: str = "https://zillow-com1.p.rapidapi.com"
+REDFIN_API_BASE_URL: str = "https://redfin-com-data.p.rapidapi.com"
+
+
+# ====================================
+# ZIP CODES & SYNTHETIC DATA (Legacy)
 # ====================================
 SYNTHETIC_DATA_SIZE = 500
-ZIP_CODES = [
+ZIP_CODES: List[str] = [
     "94102", "94103", "94104", "94105", "94107",
     "94108", "94109", "94110", "94111", "94112",
     "94114", "94115", "94116", "94117", "94118",
 ]
 
-CONDITION_SCALE = {
+CONDITION_SCALE: Dict[int, str] = {
     1: "Poor",
     2: "Fair",
     3: "Average",
     4: "Good",
     5: "Excellent",
 }
+
+
+# ====================================
+# DOCKER / PRODUCTION CONFIGURATION
+# ====================================
+DOCKER_PYTHON_VERSION: str = "3.9"
+STREAMLIT_PORT: int = 8501
