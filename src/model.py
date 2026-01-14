@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import (
     MODEL_PATH,
-    MODEL_FEATURES,
+    MODEL_FEATURES_V2_2 as MODEL_FEATURES,  # V2.2 enhanced features
     TARGET_COLUMN,
     XGBOOST_PARAMS,
     ASSETS_DIR,
@@ -408,36 +408,43 @@ class ValuationModel:
     
     def predict(
         self,
-        sqft: float,
-        bedrooms: int,
-        year_built: int,
-        condition: int,
+        property_data: Dict[str, Any] = None,
+        **kwargs
     ) -> float:
         """
         Predict property price (Black Box output).
         
         Args:
-            sqft: Square footage of the property.
-            bedrooms: Number of bedrooms.
-            year_built: Year the property was built.
-            condition: Condition rating (1-5).
+            property_data: Dict with all required features, OR
+            **kwargs: Individual feature values
         
         Returns:
             Predicted price as float.
-        
-        Raises:
-            RuntimeError: If model is not trained.
         """
         if not self.is_trained:
             raise RuntimeError("Model not trained. Call train() first.")
         
+        # Build feature dict
+        if property_data is not None:
+            feature_data = {f: property_data.get(f, 0) for f in self.features}
+        else:
+            feature_data = kwargs
+            
+        # Ensure all features have values (auto-derive if possible)
+        for feature in self.features:
+            if feature not in feature_data:
+                # Derive missing features if possible
+                if feature == "property_age" and "year_built" in feature_data:
+                    feature_data["property_age"] = 2025 - feature_data["year_built"]
+                elif feature == "sqft_per_bedroom" and "sqft" in feature_data and "bedrooms" in feature_data:
+                    feature_data["sqft_per_bedroom"] = feature_data["sqft"] / max(feature_data["bedrooms"], 1)
+                elif feature == "is_newer_construction" and "year_built" in feature_data:
+                    feature_data["is_newer_construction"] = 1 if feature_data["year_built"] >= 2000 else 0
+                else:
+                    feature_data[feature] = 0  # Default to 0 for missing spatial features
+        
         # Create feature vector
-        X = pd.DataFrame([{
-            "sqft": sqft,
-            "bedrooms": bedrooms,
-            "year_built": year_built,
-            "condition": condition,
-        }])[self.features]
+        X = pd.DataFrame([feature_data])[self.features]
         
         prediction = self.model.predict(X)[0]
         return float(prediction)
@@ -460,19 +467,15 @@ class ValuationModel:
     
     def explain(
         self,
-        sqft: float,
-        bedrooms: int,
-        year_built: int,
-        condition: int,
+        property_data: Dict[str, Any] = None,
+        **kwargs
     ) -> Dict[str, Any]:
         """
         Generate SHAP explanation for a prediction (White Box output).
         
         Args:
-            sqft: Square footage of the property.
-            bedrooms: Number of bedrooms.
-            year_built: Year the property was built.
-            condition: Condition rating (1-5).
+            property_data: Dict with all required features, OR
+            **kwargs: Individual feature values (for backwards compatibility)
         
         Returns:
             Dictionary containing:
@@ -487,13 +490,27 @@ class ValuationModel:
         if not self.is_trained or self.explainer is None:
             raise RuntimeError("Model not trained. Call train() first.")
         
+        # Build feature dict from either property_data or kwargs
+        if property_data is not None:
+            feature_data = {f: property_data.get(f, 0) for f in self.features}
+        else:
+            feature_data = kwargs
+        
+        # Ensure all features have values
+        for feature in self.features:
+            if feature not in feature_data:
+                # Derive missing features if possible
+                if feature == "property_age" and "year_built" in feature_data:
+                    feature_data["property_age"] = 2025 - feature_data["year_built"]
+                elif feature == "sqft_per_bedroom" and "sqft" in feature_data and "bedrooms" in feature_data:
+                    feature_data["sqft_per_bedroom"] = feature_data["sqft"] / max(feature_data["bedrooms"], 1)
+                elif feature == "is_newer_construction" and "year_built" in feature_data:
+                    feature_data["is_newer_construction"] = 1 if feature_data["year_built"] >= 2000 else 0
+                else:
+                    feature_data[feature] = 0  # Default to 0 for missing spatial features
+        
         # Create feature vector
-        X = pd.DataFrame([{
-            "sqft": sqft,
-            "bedrooms": bedrooms,
-            "year_built": year_built,
-            "condition": condition,
-        }])[self.features]
+        X = pd.DataFrame([feature_data])[self.features]
         
         # Get prediction
         prediction = self.model.predict(X)[0]
@@ -519,18 +536,11 @@ class ValuationModel:
             for i, feature in enumerate(self.features)
         }
         
-        feature_dict = {
-            "sqft": sqft,
-            "bedrooms": bedrooms,
-            "year_built": year_built,
-            "condition": condition,
-        }
-        
         return {
             "predicted_price": float(prediction),
             "base_value": base_value,
             "shap_values": shap_dict,
-            "feature_values": feature_dict,
+            "feature_values": feature_data,
         }
     
     def get_feature_importance(self) -> pd.DataFrame:

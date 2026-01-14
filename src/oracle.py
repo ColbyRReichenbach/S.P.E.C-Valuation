@@ -27,6 +27,9 @@ from config.settings import (
     COLORS,
 )
 
+# Import market context for interest rates
+from src.market_context import get_rate_context, calculate_monthly_payment
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -460,19 +463,25 @@ def get_vector_store() -> MarketReportVectorStore:
     return _vector_store
 
 
-def get_market_context(zip_code: str) -> Dict[str, Any]:
+def get_market_context(zip_code: str, skip_rag: bool = False) -> Dict[str, Any]:
     """
     Retrieve market context for a given zip code using RAG.
     
-    First queries the vector store for relevant market intelligence,
-    then falls back to the static database if no results found.
+    PERFORMANCE OPTIMIZATION: Set skip_rag=True to bypass the heavy
+    vector store initialization for faster initial page loads.
+    The RAG is only needed when generating investment memos.
     
     Args:
         zip_code: Property zip code.
+        skip_rag: If True, skip RAG and use static database (faster).
     
     Returns:
         Dictionary with neighborhood info, news, and risk factors.
     """
+    # Fast path: skip RAG for quick responses
+    if skip_rag:
+        return MARKET_NEWS_DATABASE.get(zip_code, DEFAULT_MARKET_NEWS)
+    
     vector_store = get_vector_store()
     
     # Query vector store for relevant context
@@ -962,7 +971,45 @@ def _generate_template_memo(
     
     memo += f"""    </div>
 </div>
-
+"""
+    
+    # Add Interest Rate & Affordability Section
+    try:
+        rate_ctx = get_rate_context()
+        payment = calculate_monthly_payment(price)
+        
+        current_rate = rate_ctx["current_rates"]["30_year_fixed"]
+        rate_env = rate_ctx["impact"]["sentiment"]
+        rate_color = "#00D47E" if rate_env == "Bullish" else "#FF4757" if rate_env == "Challenging" else "#FFB946"
+        
+        memo += f"""
+<div style="margin-bottom: 1.25rem; padding: 1rem; background: #12141a; border-radius: 6px;">
+    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.75rem 0;">Interest Rate Environment</p>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div>
+            <span style="color: #6B7280; font-size: 0.7rem;">30-Year Fixed</span>
+            <p style="color: #fff; font-size: 1.1rem; font-weight: 600; margin: 0.125rem 0 0 0;">{current_rate:.2f}%</p>
+        </div>
+        <div>
+            <span style="color: #6B7280; font-size: 0.7rem;">Environment</span>
+            <p style="color: {rate_color}; font-size: 0.9rem; font-weight: 500; margin: 0.125rem 0 0 0;">{rate_env}</p>
+        </div>
+    </div>
+    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #2d3139;">
+        <p style="color: #6B7280; font-size: 0.7rem; margin: 0 0 0.25rem 0;">Est. Monthly Payment (20% down)</p>
+        <p style="color: #fff; font-size: 1rem; font-weight: 600; margin: 0;">
+            ${payment['total_monthly']:,.0f}<span style="color: #6B7280; font-size: 0.75rem; font-weight: 400;">/month</span>
+        </p>
+        <p style="color: #6B7280; font-size: 0.7rem; margin: 0.25rem 0 0 0;">
+            P&I: ${payment['monthly_pi']:,.0f} + Tax: ${payment['monthly_tax']:,.0f} + Ins: ${payment['monthly_insurance']:,.0f}
+        </p>
+    </div>
+</div>
+"""
+    except Exception as e:
+        logger.debug(f"Could not add rate context: {e}")
+    
+    memo += f"""
 <div style="padding-top: 1rem; border-top: 1px solid #2d3139;">
     <p style="color: #4B5563; font-size: 0.7rem; font-style: italic; margin: 0;">
         {source_note}

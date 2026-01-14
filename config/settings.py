@@ -93,10 +93,23 @@ H3_RESOLUTION: int = 9  # Resolution 9 ~= 0.1 km² hexagons
 CITY_CENTER_LAT: float = 37.7749  # San Francisco City Hall
 CITY_CENTER_LON: float = -122.4194
 
+# BART Station Coordinates (SF stations)
+BART_STATIONS: List[tuple] = [
+    ("Embarcadero", 37.7929, -122.3968),
+    ("Montgomery", 37.7894, -122.4013),
+    ("Powell", 37.7844, -122.4078),
+    ("Civic Center", 37.7796, -122.4139),
+    ("16th St Mission", 37.7650, -122.4194),
+    ("24th St Mission", 37.7522, -122.4182),
+    ("Glen Park", 37.7329, -122.4343),
+    ("Balboa Park", 37.7219, -122.4474),
+]
+
 
 # ====================================
 # MODEL CONFIGURATION
 # ====================================
+# V2.1 - Core features only
 MODEL_FEATURES: List[str] = [
     "sqft",
     "bedrooms",
@@ -104,7 +117,7 @@ MODEL_FEATURES: List[str] = [
     "condition",
 ]
 
-# Extended features including spatial
+# V2 - With spatial (legacy)
 MODEL_FEATURES_V2: List[str] = [
     "sqft",
     "bedrooms",
@@ -112,6 +125,23 @@ MODEL_FEATURES_V2: List[str] = [
     "condition",
     "h3_index",
     "distance_to_center_km",
+]
+
+# V2.2 - Enhanced features (10 total) - CURRENT
+MODEL_FEATURES_V2_2: List[str] = [
+    # Core (4)
+    "sqft",
+    "bedrooms",
+    "year_built",
+    "condition",
+    # Derived (3)
+    "property_age",
+    "sqft_per_bedroom",
+    "is_newer_construction",
+    # Spatial (3)
+    "distance_to_downtown_km",
+    "distance_to_nearest_bart_km",
+    "neighborhood_price_tier",
 ]
 
 TARGET_COLUMN: str = "price"

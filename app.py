@@ -18,6 +18,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import pydeck as pdk
+import folium
+from streamlit_folium import st_folium
 
 # Add project root to path
 import sys
@@ -217,56 +219,115 @@ def inject_custom_css():
 
 
 # ====================================
-# CACHED DATA LOADING
+# CACHED DATA LOADING (OPTIMIZED)
 # ====================================
-@st.cache_data(ttl=CACHE_TTL_DATA)
+@st.cache_data(ttl=CACHE_TTL_DATA, show_spinner=False)
 def get_housing_data() -> pd.DataFrame:
-    """Load and cache housing data."""
+    """
+    Load and cache housing data.
+    
+    Optimization: Load directly from Parquet if exists,
+    bypassing the full ETL pipeline for faster startup.
+    Also ensures V2.2 features are present.
+    """
+    parquet_path = Path("data/processed/housing.parquet")
+    
+    # Fast path: load from Parquet directly
+    if parquet_path.exists():
+        df = pd.read_parquet(parquet_path)
+        
+        # Ensure V2.2 features are present (in case of stale cache)
+        v22_features = ['property_age', 'sqft_per_bedroom', 'is_newer_construction',
+                        'distance_to_downtown_km', 'distance_to_nearest_bart_km', 
+                        'neighborhood_price_tier']
+        
+        missing = [f for f in v22_features if f not in df.columns]
+        if missing:
+            from src.spatial import add_v2_2_features
+            df = add_v2_2_features(df)
+        
+        return df
+    
+    # Slow path: run ETL pipeline
     return load_processed_data()
 
 
-@st.cache_resource(ttl=CACHE_TTL_MODEL)
+@st.cache_resource(ttl=CACHE_TTL_MODEL, show_spinner=False)
 def get_model() -> ValuationModel:
-    """Load and cache the valuation model."""
+    """
+    Load and cache the valuation model.
+    
+    Optimization: Use show_spinner=False to avoid blocking UI.
+    Model is cached for 24 hours.
+    """
     return get_model_instance()
 
 
-@st.cache_data(ttl=CACHE_TTL_DATA)
+@st.cache_data(ttl=CACHE_TTL_DATA, show_spinner=False)
+def get_predictions(df_hash: str, df: pd.DataFrame, _model: ValuationModel) -> pd.DataFrame:
+    """
+    Cache model predictions on the dataset.
+    
+    This is a major optimization - predictions are computed once
+    and cached, rather than on every page interaction.
+    
+    Args:
+        df_hash: Hash of the dataframe for cache key
+        df: Housing data
+        _model: Trained model (underscore prefix = not hashed)
+    
+    Returns:
+        DataFrame with predictions and valuation status added
+    """
+    result = df.copy()
+    result["model_price"] = _model.predict_batch(result)
+    result = add_valuation_status(result)
+    return result
+
+
+def get_df_hash(df: pd.DataFrame) -> str:
+    """Generate a stable hash for a dataframe for caching."""
+    return str(hash(tuple(df.shape) + tuple(df.columns)))
+
+
+@st.cache_data(ttl=CACHE_TTL_DATA, show_spinner=False)
 def get_market_metrics() -> Dict[str, Any]:
     """
     Compute market metrics using raw SQL queries.
-    Demonstrates SQL skills for the dashboard.
+    
+    OPTIMIZATION: Combined multiple queries into a single CTE-based query
+    for faster execution. Only the top zip codes need a separate query.
     """
     metrics = {}
     
-    # Query 1: Average Days on Market
-    query1 = """
+    # Single combined query for core metrics (faster than 2 separate queries)
+    combined_query = """
     SELECT 
         ROUND(AVG(days_on_market), 1) as avg_dom,
         MIN(days_on_market) as min_dom,
-        MAX(days_on_market) as max_dom
-    FROM sales
-    """
-    result1 = execute_sql_query(query1)
-    metrics["avg_days_on_market"] = result1["avg_dom"].iloc[0]
-    metrics["query_dom"] = query1.strip()
-    
-    # Query 2: Total Volume (Sum of all prices)
-    query2 = """
-    SELECT 
+        MAX(days_on_market) as max_dom,
         COUNT(*) as total_listings,
         SUM(price) as total_volume,
         ROUND(AVG(price), 0) as avg_price
     FROM sales
     """
-    result2 = execute_sql_query(query2)
-    metrics["total_listings"] = int(result2["total_listings"].iloc[0])
-    metrics["total_volume"] = result2["total_volume"].iloc[0]
-    metrics["avg_price"] = result2["avg_price"].iloc[0]
-    metrics["query_volume"] = query2.strip()
     
-    # Query 3: Price per SqFt by Zip Code (Top 5)
-    query3 = """
+    result = execute_sql_query(combined_query)
+    metrics["avg_days_on_market"] = result["avg_dom"].iloc[0] or 0
+    metrics["total_listings"] = int(result["total_listings"].iloc[0] or 0)
+    metrics["total_volume"] = result["total_volume"].iloc[0] or 0
+    metrics["avg_price"] = result["avg_price"].iloc[0] or 0
+    
+    # Store individual query strings for display (educational purpose)
+    metrics["query_dom"] = """SELECT ROUND(AVG(days_on_market), 1) as avg_dom
+FROM sales"""
+    
+    metrics["query_volume"] = """SELECT COUNT(*) as total_listings,
+       SUM(price) as total_volume
+FROM sales"""
+    
+    # Query for top zip codes (still separate for proper aggregation)
+    zip_query = """
     SELECT 
         zip_code,
         ROUND(AVG(price / sqft), 0) as price_per_sqft,
@@ -276,9 +337,8 @@ def get_market_metrics() -> Dict[str, Any]:
     ORDER BY price_per_sqft DESC
     LIMIT 5
     """
-    result3 = execute_sql_query(query3)
-    metrics["top_zip_codes"] = result3
-    metrics["query_zip"] = query3.strip()
+    metrics["top_zip_codes"] = execute_sql_query(zip_query)
+    metrics["query_zip"] = zip_query.strip()
     
     return metrics
 
@@ -296,8 +356,11 @@ def create_shap_waterfall(explanation: Dict[str, Any]) -> go.Figure:
     shap_values = explanation["shap_values"]
     predicted_price = explanation["predicted_price"]
     
+    # Filter out features with near-zero contribution
+    active_items = {k: v for k, v in shap_values.items() if abs(v) > 1}  # $1 threshold
+    
     # Sort by absolute value for visual clarity
-    sorted_items = sorted(shap_values.items(), key=lambda x: abs(x[1]), reverse=True)
+    sorted_items = sorted(active_items.items(), key=lambda x: abs(x[1]), reverse=True)
     
     features = [item[0].replace("_", " ").title() for item in sorted_items]
     values = [item[1] for item in sorted_items]
@@ -315,20 +378,58 @@ def create_shap_waterfall(explanation: Dict[str, Any]) -> go.Figure:
         colors.append(SHAP_POSITIVE_COLOR if v > 0 else SHAP_NEGATIVE_COLOR)
     colors.append(COLORS.CHART_BLUE)  # Total
     
+    
+    # Helper to format shortened currency (e.g. $150k)
+    def fmt_k(val):
+        is_neg = val < 0
+        abs_val = abs(val)
+        if abs_val >= 1_000_000:
+            s = f"${abs_val/1_000_000:.1f}M"
+        elif abs_val >= 1000:
+            s = f"${abs_val/1000:.0f}k"
+        else:
+            s = f"${abs_val:.0f}"
+        
+        if is_neg:
+            return f"-{s}"
+        return f"+{s}" if val != base_value and val != 0 else s  # No + for baseline/total
+
+    text_labels = []
+    current_total = 0
+    max_val = base_value
+    min_val = base_value
+    
+    # Calculate running totals to determine y-axis range
+    running_total = base_value
+    for v in values:
+        running_total += v
+        max_val = max(max_val, running_total)
+        min_val = min(min_val, running_total)
+    
+    # Generate labels
+    text_labels = [fmt_k(base_value).replace("+", "")] # Baseline (no +)
+    for v in values:
+        text_labels.append(fmt_k(v))
+    text_labels.append(fmt_k(predicted_price).replace("+", "")) # Final (no +)
+
     fig = go.Figure(go.Waterfall(
         name="Price Breakdown",
         orientation="v",
         measure=measures,
         x=y_labels,
         y=waterfall_values,
-        textposition="outside",
-        text=[f"${v:,.0f}" if i == 0 else f"${v:+,.0f}" if i < len(waterfall_values) - 1 else f"${predicted_price:,.0f}" 
-              for i, v in enumerate(waterfall_values)],
+        textposition="auto",  # Automatically place inside or outside
+        text=text_labels,
         connector={"line": {"color": COLORS.TEXT_MUTED}},
         increasing={"marker": {"color": SHAP_POSITIVE_COLOR}},
         decreasing={"marker": {"color": SHAP_NEGATIVE_COLOR}},
         totals={"marker": {"color": COLORS.CHART_BLUE}},
+        textfont=dict(size=12, color="white"),  # White text works best for 'auto' inside
+        cliponaxis=False,  # Allow text to overflow axis area if needed
     ))
+    
+    # Add headroom
+    y_range_padding = (max_val - min_val) * 0.2
     
     fig.update_layout(
         title="Property Valuation Breakdown (SHAP)",
@@ -336,18 +437,22 @@ def create_shap_waterfall(explanation: Dict[str, Any]) -> go.Figure:
         plot_bgcolor=COLORS.BG_PRIMARY,
         paper_bgcolor=COLORS.BG_PRIMARY,
         font=dict(color=COLORS.TEXT_SECONDARY),
-        height=400,
-        margin=dict(t=50, b=50, l=50, r=50),
+        height=450,
+        margin=dict(t=80, b=100, l=80, r=80),
+        uniformtext=dict(minsize=10, mode='hide'),  # Ensure readable text
     )
     
     fig.update_yaxes(
         title="Price ($)",
         tickformat="$,.0f",
         gridcolor=COLORS.BG_TERTIARY,
+        range=[min_val - y_range_padding, max_val + y_range_padding], # Explicit range with padding
+        automargin=True,
     )
     
     fig.update_xaxes(
         tickangle=45,
+        automargin=True,  # Auto-adjust for labels
     )
     
     return fig
@@ -397,6 +502,12 @@ def create_price_distribution_chart(df: pd.DataFrame, selected_price: float = No
 def main():
     """Main application entry point."""
     
+    # One-time cache clear for V2.2 upgrade (remove after first run)
+    if 'v2_2_cache_cleared' not in st.session_state:
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.session_state['v2_2_cache_cleared'] = True
+    
     # Inject custom CSS
     inject_custom_css()
     
@@ -415,15 +526,15 @@ def main():
     """, unsafe_allow_html=True)
     
     # ================================
-    # LOAD DATA & MODEL
+    # LOAD DATA & MODEL (OPTIMIZED)
     # ================================
-    with st.spinner("Loading market data..."):
-        df = get_housing_data()
-        model = get_model()
-        
-        # Add model predictions to data
-        df["model_price"] = model.predict_batch(df)
-        df = add_valuation_status(df)
+    # Load data and model (cached)
+    df_raw = get_housing_data()
+    model = get_model()
+    
+    # Get cached predictions (major performance boost)
+    df_hash = get_df_hash(df_raw)
+    df = get_predictions(df_hash, df_raw, model)
     
     # ================================
     # MARKET PULSE (Header Metrics)
@@ -438,7 +549,7 @@ def main():
         st.metric(
             label="Avg Days on Market",
             value=f"{metrics['avg_days_on_market']:.0f} days",
-            delta="-5 vs last month",
+            delta=None,  # Removed fake delta - would need historical data
         )
         with st.expander("View SQL Query"):
             st.code(metrics["query_dom"], language="sql")
@@ -447,7 +558,8 @@ def main():
         st.metric(
             label="Total Market Volume",
             value=f"${metrics['total_volume'] / 1_000_000:.1f}M",
-            delta=f"{metrics['total_listings']} listings",
+            delta=None,  # Removed - was showing listing count incorrectly as delta
+            help=f"{metrics['total_listings']} total listings",
         )
         with st.expander("View SQL Query"):
             st.code(metrics["query_volume"], language="sql")
@@ -456,7 +568,7 @@ def main():
         st.metric(
             label="Average Price",
             value=f"${metrics['avg_price']:,.0f}",
-            delta="+3.2% YoY",
+            delta=None,  # Removed fake delta - would need historical data
         )
         with st.expander("View SQL Query"):
             st.code(metrics["query_zip"], language="sql")
@@ -516,55 +628,148 @@ def main():
         
         st.markdown(f"**{len(filtered_df)}** properties found")
         
-        # Property Map
+        # Initialize session state for selected property
+        if "selected_property_id" not in st.session_state:
+            st.session_state.selected_property_id = None
+        
+        # Property Map with Click-to-Select
         st.markdown("#### Property Map")
+        st.caption("Click a marker to select a property")
         
         if len(filtered_df) > 0:
-            # Prepare map data with colors
-            map_df = prepare_map_data(filtered_df).copy()
+            # Center map on data
+            center_lat = filtered_df["lat"].mean()
+            center_lon = filtered_df["lon"].mean()
             
-            # Add RGB color column based on valuation status
-            # Green (0, 212, 126) for Undervalued, Red (255, 71, 87) for Overvalued
-            map_df["color"] = map_df["valuation_status"].apply(
-                lambda x: [0, 212, 126, 180] if x == "Undervalued" else [255, 71, 87, 180]
+            # Create Folium map with dark theme
+            m = folium.Map(
+                location=[center_lat, center_lon],
+                zoom_start=12,
+                tiles="CartoDB dark_matter",
             )
             
-            # Create pydeck layer with colored markers
-            layer = pdk.Layer(
-                "ScatterplotLayer",
-                data=map_df,
-                get_position=["lon", "lat"],
-                get_color="color",
-                get_radius=150,
-                pickable=True,
+            # Add markers for each property
+            for _, row in filtered_df.iterrows():
+                property_id = row["id"]
+                is_selected = (st.session_state.selected_property_id == property_id)
+                is_undervalued = row["valuation_status"] == "Undervalued"
+                
+                # Determine marker color and size
+                if is_selected:
+                    # Selected property: bright blue, larger
+                    color = "#3B82F6"  # Blue
+                    radius = 12
+                    fill_opacity = 1.0
+                elif is_undervalued:
+                    color = "#00D47E"  # Green
+                    radius = 8
+                    fill_opacity = 0.7
+                else:
+                    color = "#FF4757"  # Red
+                    radius = 8
+                    fill_opacity = 0.7
+                
+                # Create rich tooltip (SHOWS ON HOVER - faster UX)
+                # Fixed-width layout for consistent appearance
+                status_color = '#00D47E' if is_undervalued else '#FF4757'
+                tooltip_html = f"""
+                <div style="font-family: Inter, sans-serif; width: 180px; font-size: 12px; line-height: 1.4;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <b style="font-size: 13px;">Property #{property_id}</b>
+                        <span style="color: {status_color}; font-weight: 600; font-size: 11px;">
+                            {row['valuation_status'].upper()}
+                        </span>
+                    </div>
+                    <hr style="margin: 0 0 4px 0; border: none; border-top: 1px solid #444;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span><b>Price:</b></span>
+                        <span>${row['price']:,.0f}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span><b>Model:</b></span>
+                        <span>${row['model_price']:,.0f} <span style="color: {status_color};">({row['price_delta_pct']:+.1f}%)</span></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span><b>Sqft:</b></span>
+                        <span>{row['sqft']:,}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span><b>Beds:</b></span>
+                        <span>{row['bedrooms']}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span><b>Zip:</b></span>
+                        <span>{row['zip_code']}</span>
+                    </div>
+                </div>
+                """
+                
+                # Add circle marker (no popup for speed, rich tooltip instead)
+                folium.CircleMarker(
+                    location=[row["lat"], row["lon"]],
+                    radius=radius,
+                    color=color,
+                    fill=True,
+                    fill_color=color,
+                    fill_opacity=fill_opacity,
+                    weight=2 if is_selected else 1,
+                    tooltip=folium.Tooltip(tooltip_html, sticky=True),
+                ).add_to(m)
+                
+                # Add highlight ring for selected marker
+                if is_selected:
+                    folium.CircleMarker(
+                        location=[row["lat"], row["lon"]],
+                        radius=16,
+                        color="#3B82F6",
+                        fill=False,
+                        weight=2,
+                        opacity=0.5,
+                    ).add_to(m)
+            
+            # Render Folium map and capture clicks
+            # use_container_width for responsiveness, center_on_click=False to reduce lag
+            map_data = st_folium(
+                m,
+                use_container_width=True,
+                height=400,
+                returned_objects=["last_object_clicked"],
+                key="property_map",
             )
             
-            # Set initial view state
-            view_state = pdk.ViewState(
-                latitude=map_df["lat"].mean(),
-                longitude=map_df["lon"].mean(),
-                zoom=11,
-                pitch=0,
-            )
-            
-            # Render the map
-            st.pydeck_chart(pdk.Deck(
-                layers=[layer],
-                initial_view_state=view_state,
-                map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
-            ))
+            # Handle map click events
+            if map_data and map_data.get("last_object_clicked"):
+                clicked_lat = map_data["last_object_clicked"].get("lat")
+                clicked_lng = map_data["last_object_clicked"].get("lng")
+                
+                if clicked_lat and clicked_lng:
+                    # Find the closest property to the click
+                    filtered_df["_dist"] = (
+                        (filtered_df["lat"] - clicked_lat) ** 2 +
+                        (filtered_df["lon"] - clicked_lng) ** 2
+                    )
+                    closest_property = filtered_df.loc[filtered_df["_dist"].idxmin()]
+                    
+                    # Update selected property if different
+                    if st.session_state.selected_property_id != closest_property["id"]:
+                        st.session_state.selected_property_id = closest_property["id"]
+                        st.rerun()
             
             # Legend
             st.markdown(f"""
-            <div style="display: flex; gap: 1rem; margin-top: 0.5rem;">
+            <div style="display: flex; gap: 1rem; margin-top: 0.5rem; flex-wrap: wrap;">
                 <span class="badge-undervalued">● Undervalued</span>
                 <span class="badge-overvalued">● Overvalued</span>
+                <span style="background-color: #3B82F615; color: #3B82F6; padding: 0.35rem 0.85rem; 
+                             border-radius: 4px; font-weight: 500; font-size: 0.8rem;">
+                    ● Selected
+                </span>
             </div>
             """, unsafe_allow_html=True)
         else:
             st.info("No properties match the current filters.")
         
-        # Property Selection
+        # Property Selection (synced with map clicks)
         st.markdown("#### Select Property")
         
         if len(filtered_df) > 0:
@@ -573,13 +778,29 @@ def main():
                 axis=1
             ).tolist()
             
+            # Find the index of currently selected property (from map click)
+            default_index = 0
+            if st.session_state.selected_property_id is not None:
+                matching_options = [i for i, opt in enumerate(property_options) 
+                                   if f"ID {st.session_state.selected_property_id}:" in opt]
+                if matching_options:
+                    default_index = matching_options[0]
+            
+            # Callback to update session state without extra rerun
+            def on_property_select():
+                selected_str = st.session_state.property_select_widget
+                new_id = int(selected_str.split(":")[0].replace("ID ", ""))
+                st.session_state.selected_property_id = new_id
+            
             selected_property_str = st.selectbox(
                 "Choose a property to analyze",
                 property_options,
-                key="property_select",
+                index=default_index,
+                key="property_select_widget",
+                on_change=on_property_select,
             )
             
-            # Extract selected property ID
+            # Extract selected property ID from dropdown (without rerun)
             selected_id = int(selected_property_str.split(":")[0].replace("ID ", ""))
             selected_property = filtered_df[filtered_df["id"] == selected_id].iloc[0]
         else:
@@ -630,12 +851,7 @@ def main():
             # ================================
             st.markdown("#### Valuation Breakdown")
             
-            explanation = model.explain(
-                sqft=selected_property["sqft"],
-                bedrooms=selected_property["bedrooms"],
-                year_built=selected_property["year_built"],
-                condition=selected_property["condition"],
-            )
+            explanation = model.explain(property_data=selected_property.to_dict())
             
             waterfall_chart = create_shap_waterfall(explanation)
             st.plotly_chart(waterfall_chart, use_container_width=True)
@@ -669,13 +885,13 @@ def main():
                     help="1=Poor, 5=Excellent",
                 )
             
+            # Prepare simulation data: Start with original property features, update with new inputs
+            sim_data = selected_property.to_dict().copy()
+            sim_data["sqft"] = sim_sqft
+            sim_data["condition"] = sim_condition
+            
             # Calculate new prediction
-            new_price = model.predict(
-                sqft=sim_sqft,
-                bedrooms=selected_property["bedrooms"],
-                year_built=selected_property["year_built"],
-                condition=sim_condition,
-            )
+            new_price = model.predict(property_data=sim_data)
             
             original_model_price = selected_property["model_price"]
             price_change = new_price - original_model_price

@@ -283,6 +283,96 @@ def add_distance_to_center(
 
 
 # ====================================
+# V2.2 ENHANCED FEATURE ENGINEERING
+# ====================================
+def calculate_distance_to_nearest_bart(lat: float, lon: float) -> float:
+    """
+    Calculate distance to nearest BART station.
+    
+    Args:
+        lat: Property latitude
+        lon: Property longitude
+    
+    Returns:
+        Distance to nearest BART station in km
+    """
+    from config.settings import BART_STATIONS
+    
+    min_distance = float('inf')
+    for station_name, station_lat, station_lon in BART_STATIONS:
+        dist = calculate_distance(lat, lon, station_lat, station_lon)
+        if dist < min_distance:
+            min_distance = dist
+    
+    return min_distance
+
+
+def add_v2_2_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add all V2.2 enhanced features to DataFrame.
+    
+    Adds:
+    - property_age: 2025 - year_built
+    - sqft_per_bedroom: sqft / max(bedrooms, 1)
+    - is_newer_construction: 1 if year_built >= 2000, else 0
+    - distance_to_downtown_km: Haversine distance to SF City Hall
+    - distance_to_nearest_bart_km: Distance to closest BART station
+    - neighborhood_price_tier: 1-5 tier based on zip code median price
+    
+    Args:
+        df: DataFrame with property data
+    
+    Returns:
+        DataFrame with added V2.2 features
+    """
+    df = df.copy()
+    current_year = 2025
+    
+    # Derived features
+    df["property_age"] = current_year - df["year_built"]
+    df["sqft_per_bedroom"] = df["sqft"] / df["bedrooms"].clip(lower=1)
+    df["is_newer_construction"] = (df["year_built"] >= 2000).astype(int)
+    
+    # Spatial features
+    df["distance_to_downtown_km"] = df.apply(
+        lambda row: calculate_distance_to_center(row["lat"], row["lon"]),
+        axis=1
+    )
+    
+    df["distance_to_nearest_bart_km"] = df.apply(
+        lambda row: calculate_distance_to_nearest_bart(row["lat"], row["lon"]),
+        axis=1
+    )
+    
+    # Neighborhood price tier (1-5 based on zip code median prices)
+    # Calculate median price by zip code
+    if "price" in df.columns:
+        zip_medians = df.groupby("zip_code")["price"].median()
+        
+        # Create quintile tiers (1 = lowest, 5 = highest)
+        try:
+            zip_tiers = pd.qcut(zip_medians, q=5, labels=[1, 2, 3, 4, 5], duplicates='drop')
+        except ValueError:
+            # Not enough unique values for 5 bins
+            zip_tiers = pd.qcut(zip_medians.rank(method='first'), q=min(5, len(zip_medians)), 
+                               labels=range(1, min(6, len(zip_medians) + 1)), duplicates='drop')
+        
+        tier_map = zip_tiers.to_dict()
+        df["neighborhood_price_tier"] = df["zip_code"].map(tier_map).fillna(3).astype(int)
+    else:
+        # If no price column, default to tier 3
+        df["neighborhood_price_tier"] = 3
+    
+    logger.info(
+        f"Added V2.2 features. "
+        f"property_age: {df['property_age'].min()}-{df['property_age'].max()} years, "
+        f"BART distance: {df['distance_to_nearest_bart_km'].min():.2f}-{df['distance_to_nearest_bart_km'].max():.2f} km"
+    )
+    
+    return df
+
+
+# ====================================
 # SPATIAL FEATURE ENGINEERING
 # ====================================
 def add_all_spatial_features(

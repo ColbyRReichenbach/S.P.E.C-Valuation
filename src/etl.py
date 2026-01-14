@@ -365,8 +365,9 @@ def load_or_ingest_raw_data(
     
     Priority:
     1. If force_api=True, always fetch from API
-    2. If CSV exists, load from CSV
-    3. Otherwise, ingest from API (simulation mode if no keys)
+    2. If Redfin real data exists, use that (preferred)
+    3. If CSV exists, load from CSV
+    4. Otherwise, ingest from API (simulation mode if no keys)
     
     Args:
         force_api: Force API ingestion even if CSV exists.
@@ -378,6 +379,15 @@ def load_or_ingest_raw_data(
     ensure_directories()
     
     if not force_api:
+        # Try to load real Redfin data first
+        redfin_path = RAW_DATA_DIR / "redfin_training_data.csv"
+        if redfin_path.exists():
+            logger.info(f"Loading real Redfin data from {redfin_path}")
+            df = pd.read_csv(redfin_path, dtype={'zip_code': str})
+            logger.info(f"Loaded {len(df)} records from real Redfin data")
+            return df
+        
+        # Fall back to existing CSV
         df = load_raw_data_from_csv()
         if df is not None:
             return df
@@ -514,14 +524,20 @@ def run_etl_pipeline(
             # Continue with warnings rather than failing
             # In production, you might want stricter behavior
     
+    # Step 5b: Add V2.2 enhanced features
+    logger.info("Step 5b: Adding V2.2 enhanced features...")
+    from src.spatial import add_v2_2_features
+    df = add_v2_2_features(df)
+    
     # Step 6: Load
     logger.info("Step 6: Loading to storage...")
     save_to_parquet(df)
     save_to_sqlite(df)
     
     logger.info("=" * 50)
-    logger.info("ETL Pipeline Complete")
+    logger.info("ETL Pipeline Complete (V2.2)")
     logger.info(f"Final record count: {len(df)}")
+    logger.info(f"Features available: {list(df.columns)}")
     logger.info("=" * 50)
     
     return df
