@@ -792,7 +792,8 @@ def _generate_ai_memo_with_rag(
     feature_values: Dict,
     market_context: Dict,
 ) -> str:
-    """Generate memo using OpenAI API with RAG context."""
+    """Generate memo using OpenAI API with structured JSON output, rendered as HTML."""
+    import json
     
     # Build the prompt with RAG context
     shap_explanation = "\n".join([
@@ -807,13 +808,19 @@ def _generate_ai_memo_with_rag(
     rag_context = market_context.get("rag_context", "")
     rag_section = ""
     if rag_context:
-        rag_section = f"""
-RETRIEVED MARKET INTELLIGENCE:
-{rag_context[:1500]}  # Truncate to avoid token limits
-"""
+        rag_section = f"\nRETRIEVED MARKET INTELLIGENCE:\n{rag_context[:1500]}"
     
-    prompt = f"""You are a Bearish Investment Analyst reviewing a residential property valuation. 
-Your job is to critically evaluate the property and highlight potential risks while remaining data-driven.
+    prompt = f"""You are a Bearish Investment Analyst reviewing a residential property valuation.
+Analyze this property and return a JSON object with the following structure:
+
+{{
+    "recommendation": "BUY" or "HOLD" or "AVOID",
+    "valuation_summary": "2-3 sentences analyzing the valuation vs market baseline. Include specific dollar amounts.",
+    "sentiment": "Bullish" or "Neutral" or "Bearish",
+    "risk_factors": ["Risk 1", "Risk 2", "Risk 3"],
+    "market_outlook": "1-2 sentences on local market conditions and trends.",
+    "news_highlights": ["Recent development 1", "Recent development 2"]
+}}
 
 PROPERTY DATA:
 - Model Valuation: ${price:,.0f}
@@ -832,36 +839,202 @@ Sentiment: {market_context.get('sentiment', 'Neutral')}
 Recent News:
 {news_items}
 
-Risk Factors:
+Known Risk Factors:
 {risk_items}
 {rag_section}
 
-Write a concise investment memo (3-4 paragraphs) that:
-1. Summarizes the valuation and key price drivers
-2. Critically analyzes risks and bearish considerations  
-3. Provides a recommendation with caveats
-
-Use a professional, analytical tone. Include specific numbers. Be skeptical but fair."""
+Return ONLY valid JSON. Be specific with numbers and percentages."""
 
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     
     response = client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": "You are a senior real estate investment analyst with a bearish disposition. You use data-driven analysis and cite specific market intelligence when available."},
+            {"role": "system", "content": "You are a senior real estate investment analyst. Always respond with valid JSON only."},
             {"role": "user", "content": prompt}
         ],
+        response_format={"type": "json_object"},
         temperature=0.7,
         max_tokens=600,
     )
     
-    response_text = response.choices[0].message.content
+    # Parse the JSON response
+    ai_data = json.loads(response.choices[0].message.content)
     
-    # Fix Streamlit LaTeX rendering issue
-    # Streamlit interprets $...$ as math, stripping spaces. We escape $ to \$.
-    response_text = response_text.replace("$", "\\$")
+    # Now render using the same HTML template structure as _generate_template_memo
+    return _render_memo_html(
+        price=price,
+        base_value=base_value,
+        sorted_shap=sorted_shap,
+        recommendation=ai_data.get("recommendation", "HOLD"),
+        valuation_summary=ai_data.get("valuation_summary", ""),
+        sentiment=ai_data.get("sentiment", "Neutral"),
+        risk_factors=ai_data.get("risk_factors", []),
+        market_outlook=ai_data.get("market_outlook", ""),
+        news_highlights=ai_data.get("news_highlights", []),
+        neighborhood=market_context.get("neighborhood", "San Francisco"),
+        is_ai_generated=True
+    )
+
+
+def _render_memo_html(
+    price: float,
+    base_value: float,
+    sorted_shap: list,
+    recommendation: str,
+    valuation_summary: str,
+    sentiment: str,
+    risk_factors: list,
+    market_outlook: str,
+    news_highlights: list,
+    neighborhood: str,
+    is_ai_generated: bool = False,
+) -> str:
+    """Render investment memo as styled HTML (shared between AI and template)."""
     
-    return response_text
+    # Get positive/negative drivers from SHAP
+    positive_drivers = [(f, v) for f, v in sorted_shap if v > 0]
+    negative_drivers = [(f, v) for f, v in sorted_shap if v < 0]
+    
+    # Calculate price diff
+    price_diff = price - base_value
+    price_diff_pct = (price_diff / base_value) * 100 if base_value > 0 else 0
+    
+    # Determine colors
+    if recommendation == "BUY" or "BUY" in recommendation.upper():
+        rec_color = "#00D47E"
+    elif recommendation == "AVOID" or "AVOID" in recommendation.upper():
+        rec_color = "#FF4757"
+    else:
+        rec_color = "#FFB946"
+    
+    sentiment_color = "#00D47E" if sentiment == "Bullish" else "#FF4757" if sentiment == "Bearish" else "#FFB946"
+    
+    # AI badge
+    ai_badge = ""
+    if is_ai_generated:
+        ai_badge = """<span style="background: #10B981; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.6rem; text-transform: uppercase; margin-left: 0.5rem;">AI GENERATED</span>"""
+    
+    # Build the memo HTML
+    memo = f"""
+<div style="background: #1a1d24; border: 1px solid #2d3139; border-radius: 8px; padding: 1.5rem; margin-top: 0.5rem;">
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #2d3139;">
+    <div>
+        <p style="color: #6B7280; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; margin: 0;">Investment Recommendation{ai_badge}</p>
+        <p style="color: {rec_color}; font-size: 1.25rem; font-weight: 600; margin: 0.25rem 0 0 0;">{recommendation}</p>
+    </div>
+    <div style="text-align: right;">
+        <p style="color: #6B7280; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; margin: 0;">Model Confidence</p>
+        <p style="color: #E5E7EB; font-size: 1.25rem; font-weight: 600; margin: 0.25rem 0 0 0;">HIGH</p>
+    </div>
+</div>
+
+<div style="margin-bottom: 1.25rem;">
+    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Valuation Summary</p>
+    <p style="color: #D1D5DB; font-size: 0.9rem; line-height: 1.6; margin: 0;">
+        {valuation_summary if valuation_summary else f"The model values this property at <strong style='color: #fff;'>${price:,.0f}</strong>, representing a <span style='color: {'#00D47E' if price_diff >= 0 else '#FF4757'};'>{price_diff_pct:+.1f}%</span> deviation from the market baseline of ${base_value:,.0f}."}
+    </p>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
+    <div>
+        <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Value Drivers (+)</p>
+"""
+    
+    if positive_drivers:
+        for feat, val in positive_drivers[:3]:
+            memo += f"""        <p style="color: #00D47E; font-size: 0.85rem; margin: 0.25rem 0;">{feat.replace('_', ' ').title()}: +${val:,.0f}</p>\n"""
+    else:
+        memo += """        <p style="color: #6B7280; font-size: 0.85rem; margin: 0.25rem 0;">No positive drivers identified</p>\n"""
+    
+    memo += """    </div>
+    <div>
+        <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Value Detractors (-)</p>
+"""
+    
+    if negative_drivers:
+        for feat, val in negative_drivers[:3]:
+            memo += f"""        <p style="color: #FF4757; font-size: 0.85rem; margin: 0.25rem 0;">{feat.replace('_', ' ').title()}: ${val:,.0f}</p>\n"""
+    else:
+        memo += """        <p style="color: #6B7280; font-size: 0.85rem; margin: 0.25rem 0;">No negative drivers identified</p>\n"""
+    
+    memo += f"""    </div>
+</div>
+
+<div style="margin-bottom: 1.25rem; padding: 1rem; background: #12141a; border-radius: 6px;">
+    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Market Context: {neighborhood}</p>
+    <div style="display: flex; gap: 2rem; margin-bottom: 0.75rem;">
+        <div>
+            <span style="color: #6B7280; font-size: 0.75rem;">Sentiment</span>
+            <p style="color: {sentiment_color}; font-size: 0.9rem; font-weight: 500; margin: 0.125rem 0 0 0;">{sentiment}</p>
+        </div>
+    </div>
+    <p style="color: #6B7280; font-size: 0.75rem; margin: 0.5rem 0 0.25rem 0;">Recent Developments:</p>
+"""
+    
+    # Use AI-provided news or fallback
+    news_to_show = news_highlights if news_highlights else ["Market conditions are being monitored."]
+    for news in news_to_show[:2]:
+        memo += f"""    <p style="color: #9CA3AF; font-size: 0.8rem; margin: 0.2rem 0; padding-left: 0.75rem; border-left: 2px solid #2d3139;">{news}</p>\n"""
+    
+    # Market outlook
+    if market_outlook:
+        memo += f"""    <p style="color: #D1D5DB; font-size: 0.85rem; margin-top: 0.75rem; line-height: 1.5;">{market_outlook}</p>\n"""
+    
+    memo += """</div>
+
+<div style="margin-bottom: 1rem;">
+    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Risk Factors</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+"""
+    
+    for risk in risk_factors[:5]:
+        memo += f"""        <span style="background: #FF475715; color: #FF4757; padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.75rem;">{risk}</span>\n"""
+    
+    memo += """    </div>
+</div>
+"""
+    
+    # Add Interest Rate & Affordability Section
+    try:
+        rate_ctx = get_rate_context()
+        payment = calculate_monthly_payment(price)
+        
+        current_rate = rate_ctx["current_rates"]["30_year_fixed"]
+        rate_env = rate_ctx["impact"]["sentiment"]
+        rate_color = "#00D47E" if rate_env == "Bullish" else "#FF4757" if rate_env == "Challenging" else "#FFB946"
+        
+        memo += f"""
+<div style="margin-bottom: 1.25rem; padding: 1rem; background: #12141a; border-radius: 6px;">
+    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.75rem 0;">Interest Rate Environment</p>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div>
+            <span style="color: #6B7280; font-size: 0.7rem;">30-Year Fixed</span>
+            <p style="color: #fff; font-size: 1.1rem; font-weight: 600; margin: 0.125rem 0 0 0;">{current_rate:.2f}%</p>
+        </div>
+        <div>
+            <span style="color: #6B7280; font-size: 0.7rem;">Environment</span>
+            <p style="color: {rate_color}; font-size: 0.9rem; font-weight: 500; margin: 0.125rem 0 0 0;">{rate_env}</p>
+        </div>
+    </div>
+    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #2d3139;">
+        <p style="color: #6B7280; font-size: 0.7rem; margin: 0 0 0.25rem 0;">Est. Monthly Payment (20% down)</p>
+        <p style="color: #fff; font-size: 1rem; font-weight: 600; margin: 0;">
+            ${payment['total_monthly']:,.0f}<span style="color: #6B7280; font-size: 0.75rem; font-weight: 400;">/month</span>
+        </p>
+        <p style="color: #6B7280; font-size: 0.7rem; margin: 0.25rem 0 0 0;">
+            P&I: ${payment['monthly_pi']:,.0f} + Tax: ${payment['monthly_tax']:,.0f} + Ins: ${payment['monthly_insurance']:,.0f}
+        </p>
+    </div>
+</div>
+"""
+    except Exception as e:
+        logger.debug(f"Could not add rate context: {e}")
+    
+    memo += "</div>"
+    
+    return memo
 
 
 def _generate_template_memo(
