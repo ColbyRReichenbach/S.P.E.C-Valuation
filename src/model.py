@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import (
     MODEL_PATH,
-    MODEL_FEATURES_V3 as MODEL_FEATURES,  # V3.0 with H3 spatial lags
+    MODEL_FEATURES_V3 as MODEL_FEATURES,  # V3.0 with H3 spatial lags (69.2% PPE10!)
     TARGET_COLUMN,
     XGBOOST_PARAMS,
     ASSETS_DIR,
