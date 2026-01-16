@@ -378,7 +378,7 @@ def create_shap_waterfall(explanation: Dict[str, Any]) -> go.Figure:
     values = [item[1] for item in sorted_items]
     
     # Build waterfall data
-    y_labels = ["Baseline"] + features + ["Final Price"]
+    y_labels = ["Market Baseline"] + features + ["Final Price"]
     
     # Calculate cumulative positions
     measures = ["absolute"] + ["relative"] * len(features) + ["total"]
