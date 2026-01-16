@@ -426,6 +426,12 @@ log_ai_interaction(
 - [ ] Cascading Model Architecture (segmented by property tier)
 - [ ] FRED Interest Rate Integration
 - [ ] Multi-provider LLM Routing
+- [ ] **AI Persona Selector** 🆕
+  - Multiple analyst personas: Bearish 🐻 | Neutral ⚖️ | Bullish 🐂
+  - User-selectable OpenAI model (GPT-4o-mini, GPT-4o, GPT-4.1)
+  - Transparency widget showing recommendation distribution per persona
+  - Research: Run batch analysis on 100+ properties per persona
+  - Goal: Let users choose analysis style that matches their investment philosophy
 
 ---
 
