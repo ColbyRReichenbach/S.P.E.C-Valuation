@@ -271,15 +271,59 @@ def detect_outliers(
     
     # Save flagged records for manual review
     if save_flagged and n_outliers > 0:
-        outliers_df = df[df["is_outlier"]][["id", "price", "sqft", "bedrooms", "year_built", "condition", "zip_code"]]
-        outliers_path = PROCESSED_DATA_DIR / "outliers.csv"
-        outliers_df.to_csv(outliers_path, index=False)
-        logger.info(f"  Flagged records saved to: {outliers_path}")
+        outliers_df = df[df["is_outlier"]].copy()
         
-        # Log some examples
+        # Add reason column based on which metrics are extreme
+        def get_outlier_reason(row):
+            reasons = []
+            # Calculate percentiles for context
+            price_95 = df["price"].quantile(0.95)
+            price_05 = df["price"].quantile(0.05)
+            ppsf_95 = df["price_per_sqft"].quantile(0.95) if "price_per_sqft" in df.columns else float('inf')
+            ppsf_05 = df["price_per_sqft"].quantile(0.05) if "price_per_sqft" in df.columns else 0
+            sqft_95 = df["sqft"].quantile(0.95)
+            sqft_05 = df["sqft"].quantile(0.05)
+            
+            if row["price"] > price_95:
+                reasons.append(f"Price > 95th pct (${price_95:,.0f})")
+            elif row["price"] < price_05:
+                reasons.append(f"Price < 5th pct (${price_05:,.0f})")
+            
+            if "price_per_sqft" in row and row["price_per_sqft"] > ppsf_95:
+                reasons.append(f"$/sqft > 95th pct")
+            elif "price_per_sqft" in row and row["price_per_sqft"] < ppsf_05:
+                reasons.append(f"$/sqft < 5th pct")
+            
+            if row["sqft"] > sqft_95:
+                reasons.append(f"Sqft > 95th pct ({sqft_95:,.0f})")
+            elif row["sqft"] < sqft_05:
+                reasons.append(f"Sqft < 5th pct ({sqft_05:,.0f})")
+            
+            return "; ".join(reasons) if reasons else "Multivariate anomaly"
+        
+        outliers_df["reason"] = outliers_df.apply(get_outlier_reason, axis=1)
+        
+        # Select columns for export
+        export_cols = ["id", "price", "sqft", "bedrooms", "year_built", "condition", "zip_code", "reason"]
+        if "price_per_sqft" in outliers_df.columns:
+            export_cols.insert(3, "price_per_sqft")
+        
+        outliers_export = outliers_df[[c for c in export_cols if c in outliers_df.columns]]
+        
+        # Save as Parquet (primary) and CSV (human readable)
+        parquet_path = PROCESSED_DATA_DIR / "outliers.parquet"
+        csv_path = PROCESSED_DATA_DIR / "outliers.csv"
+        
+        outliers_export.to_parquet(parquet_path, index=False)
+        outliers_export.to_csv(csv_path, index=False)
+        
+        logger.info(f"  Outliers exported to: {parquet_path}")
+        logger.info(f"  Human-readable CSV: {csv_path}")
+        
+        # Log some examples with reasons
         logger.info("  Sample outliers:")
-        for _, row in outliers_df.head(5).iterrows():
-            logger.info(f"    ID {row['id']}: ${row['price']:,.0f}, {row['sqft']:.0f} sqft, {row['bedrooms']} bed")
+        for _, row in outliers_export.head(5).iterrows():
+            logger.info(f"    ID {row['id']}: ${row['price']:,.0f} - {row['reason']}")
     
     return df
 
