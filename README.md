@@ -122,12 +122,24 @@ Open http://localhost:8501
 
 ---
 
-## Roadmap
+## Version History
 
-- [x] V1.0: Basic XGBoost model
+This project evolved through multiple iterations. See [MODEL_CHANGELOG.md](docs/MODEL_CHANGELOG.md) for detailed development decisions.
+
+| Version | Focus | Key Additions |
+|---------|-------|---------------|
+| [v1.0](https://github.com/ColbyRReichenbach/S.P.E.C-Valuation/releases/tag/v1.0) | Foundation | Initial scaffold, basic UI |
+| [v2.0](https://github.com/ColbyRReichenbach/S.P.E.C-Valuation/releases/tag/v2.0) | Optimization | Optuna tuning, MLflow tracking, SHAP |
+| [v3.1](https://github.com/ColbyRReichenbach/S.P.E.C-Valuation/releases/tag/v3.1) | AI & Spatial | GPT-4 memos, H3 lags, comps, security ← **Current** |
+
+### Roadmap
+
+- [x] V1.0: Project scaffold
 - [x] V2.0: SHAP + MLflow + Docker
-- [x] V3.0: AI Memos + Comps + H3 Spatial Features ← *Current*
-- [ ] V4.0: Multi-persona AI, data expansion to 10K records
+- [x] V3.1: AI Memos + Comps + H3 Spatial Features
+- [ ] V4.0: Real transaction data (NYC edition)
+
+> **Note**: This version uses **simulated San Francisco data** for architectural demonstration. The system design, ML pipeline, and explainability features are production-ready. A future NYC edition with 1M+ real transactions is planned.
 
 ---
 
