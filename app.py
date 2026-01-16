@@ -917,14 +917,59 @@ def main():
             # ================================
             st.markdown("#### Investment Analysis")
             
-            with st.spinner("Generating analysis..."):
-                memo = generate_investment_memo(
+            # Initialize session state for AI memo
+            if "ai_memo_property_id" not in st.session_state:
+                st.session_state.ai_memo_property_id = None
+                st.session_state.ai_memo_content = None
+            
+            current_property_id = selected_property.get("id")
+            
+            # Check if we already have a memo for this property
+            if st.session_state.ai_memo_property_id == current_property_id and st.session_state.ai_memo_content:
+                st.markdown(st.session_state.ai_memo_content, unsafe_allow_html=True)
+                st.caption("✅ AI analysis loaded from cache")
+            else:
+                # Show template memo by default (no API call)
+                template_memo = generate_investment_memo(
                     price=selected_property["model_price"],
                     shap_data=explanation,
                     zip_code=selected_property["zip_code"],
+                    use_ai=False,  # Use template only, no API call
                 )
-            
-            st.markdown(memo, unsafe_allow_html=True)
+                st.markdown(template_memo, unsafe_allow_html=True)
+                
+                # Button to run AI analysis
+                st.markdown("---")
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    run_ai = st.button(
+                        "🤖 Run AI Analysis",
+                        help="Generate AI-powered investment memo using OpenAI",
+                        type="primary",
+                        use_container_width=True,
+                    )
+                
+                with col2:
+                    # Estimate cost before running
+                    estimated_cost = 0.0003  # ~$0.0003 per memo with gpt-4o-mini
+                    st.caption(f"Est. cost: ${estimated_cost:.4f}")
+                
+                if run_ai:
+                    with st.spinner("🤖 AI is analyzing property..."):
+                        ai_memo = generate_investment_memo(
+                            price=selected_property["model_price"],
+                            shap_data=explanation,
+                            zip_code=selected_property["zip_code"],
+                            use_ai=True,  # Now use OpenAI
+                        )
+                    
+                    # Cache the result
+                    st.session_state.ai_memo_property_id = current_property_id
+                    st.session_state.ai_memo_content = ai_memo
+                    
+                    # Force rerun to show cached result
+                    st.rerun()
         
         else:
             st.info("Select a property from the Screener to view detailed analysis.")
