@@ -762,7 +762,8 @@ def generate_investment_memo(
         
         if client:
             try:
-                memo = _generate_ai_memo_with_rag(
+                # Generate JSON content from AI
+                memo_data = _generate_ai_memo_json(
                     client=client,
                     price=price,
                     base_value=base_value,
@@ -770,11 +771,21 @@ def generate_investment_memo(
                     feature_values=feature_values,
                     market_context=market_context,
                 )
-                return memo
+                
+                # Render into shared HTML template
+                return _format_memo_html(
+                    data=memo_data,
+                    price=price,
+                    base_value=base_value,
+                    sorted_shap=sorted_shap,
+                    market_context=market_context,
+                    is_ai=True
+                )
             except Exception as e:
                 logger.error(f"AI memo generation failed: {e}")
+                # Fallback to template if AI fails
     
-    # Fallback to template-based memo
+    # Fallback/Template generation
     return _generate_template_memo(
         price=price,
         base_value=base_value,
@@ -784,78 +795,64 @@ def generate_investment_memo(
     )
 
 
-def _generate_ai_memo_with_rag(
+def _generate_ai_memo_json(
     client,
     price: float,
     base_value: float,
     sorted_shap: list,
     feature_values: Dict,
     market_context: Dict,
-) -> str:
-    """Generate memo using OpenAI API with RAG context."""
+) -> Dict[str, Any]:
+    """Generate structured JSON memo using OpenAI."""
+    from src.ai_security import create_secure_prompt, validate_memo_output
+    import json
     
-    # Build the prompt with RAG context
-    shap_explanation = "\n".join([
-        f"  - {feat}: ${val:+,.0f} impact"
-        for feat, val in sorted_shap
-    ])
-    
-    news_items = "\n".join([f"  - {n}" for n in market_context.get("news", [])])
-    risk_items = "\n".join([f"  - {r}" for r in market_context.get("risk_factors", [])])
-    
-    # Include RAG-retrieved context if available
+    # Build context similar to before...
+    shap_explanation = "\n".join([f"{k}: ${v:+,.0f}" for k, v in sorted_shap])
     rag_context = market_context.get("rag_context", "")
-    rag_section = ""
-    if rag_context:
-        rag_section = f"""
-RETRIEVED MARKET INTELLIGENCE:
-{rag_context[:1500]}  # Truncate to avoid token limits
-"""
     
-    prompt = f"""You are a Bearish Investment Analyst reviewing a residential property valuation. 
-Your job is to critically evaluate the property and highlight potential risks while remaining data-driven.
-
-PROPERTY DATA:
-- Model Valuation: ${price:,.0f}
-- Market Baseline: ${base_value:,.0f}
-- Square Footage: {feature_values.get('sqft', 'N/A')} sqft
-- Bedrooms: {feature_values.get('bedrooms', 'N/A')}
-- Year Built: {feature_values.get('year_built', 'N/A')}
-- Condition Rating: {feature_values.get('condition', 'N/A')}/5
-
-VALUATION BREAKDOWN (SHAP Analysis):
-{shap_explanation}
-
-MARKET CONTEXT - {market_context.get('neighborhood', 'San Francisco')}:
-Sentiment: {market_context.get('sentiment', 'Neutral')}
-
-Recent News:
-{news_items}
-
-Risk Factors:
-{risk_items}
-{rag_section}
-
-Write a concise investment memo (3-4 paragraphs) that:
-1. Summarizes the valuation and key price drivers
-2. Critically analyzes risks and bearish considerations  
-3. Provides a recommendation with caveats
-
-Use a professional, analytical tone. Include specific numbers. Be skeptical but fair."""
-
+    system_instruction = """You are a Bearish Investment Analyst. 
+    Output ONLY valid JSON matching this schema:
+    {
+        "recommendation": "BUY | HOLD | AVOID",
+        "recommendation_reason": "Short 5-word rationale",
+        "sentiment": "Bullish | Neutral | Bearish",
+        "summary": "2-3 sentences analyzing the valuation vs market.",
+        "risk_factors": ["Risk 1", "Risk 2", "Risk 3"],
+        "key_drivers": ["Driver 1", "Driver 2"],
+        "market_outlook": "One sentence on the local market context."
+    }"""
+    
+    task = f"""
+    Analyze this property valuation of ${price:,.0f}.
+    Base Value: ${base_value:,.0f}
+    
+    Factors:
+    {shap_explanation}
+    
+    Market Context:
+    {rag_context}
+    """
+    
+    # Create secure prompt
+    prompt = create_secure_prompt(
+        system_instructions=system_instruction,
+        property_data={"price": price, "shap": sorted_shap},
+        market_context=rag_context,
+        task=task
+    )
+    
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     
     response = client.chat.completions.create(
         model=model,
-        messages=[
-            {"role": "system", "content": "You are a senior real estate investment analyst with a bearish disposition. You use data-driven analysis and cite specific market intelligence when available."},
-            {"role": "user", "content": prompt}
-        ],
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
         temperature=0.7,
-        max_tokens=600,
     )
     
-    return response.choices[0].message.content
+    content = response.choices[0].message.content
+    return json.loads(content)
 
 
 def _generate_template_memo(
@@ -865,97 +862,16 @@ def _generate_template_memo(
     feature_values: Dict,
     market_context: Dict,
 ) -> str:
-    """Generate fallback template-based memo."""
+    """Generate the standard template using the shared HTML renderer."""
     
-    # Determine overall assessment
-    sentiment = market_context.get("sentiment", "Neutral")
-    neighborhood = market_context.get("neighborhood", "Greater San Francisco")
-    
-    # Get top positive and negative drivers
-    positive_drivers = [(f, v) for f, v in sorted_shap if v > 0]
-    negative_drivers = [(f, v) for f, v in sorted_shap if v < 0]
-    
-    # Calculate price premium/discount
+    # Logic to build template data
     price_diff = price - base_value
-    price_diff_pct = (price_diff / base_value) * 100 if base_value > 0 else 0
+    sentiment = market_context.get("sentiment", "Neutral")
     
-    # Determine recommendation based on sentiment
     if sentiment == "Bullish":
-        recommendation = "CAUTIOUS BUY"
-        rec_color = "#00D47E"
+        rec = "CAUTIOUS BUY"
+        reason = "Market momentum supports valuation"
     elif sentiment == "Bearish":
-        recommendation = "HOLD / AVOID"
-        rec_color = "#FF4757"
-    else:
-        recommendation = "NEUTRAL"
-        rec_color = "#FFB946"
-    
-    # Check for RAG source
-    source_note = ""
-    if market_context.get("source") == "rag_retrieval":
-        source_note = "Analysis enhanced with retrieved market intelligence."
-    else:
-        source_note = "Configure OPENAI_API_KEY for AI-powered insights."
-    
-    # Build the memo
-    memo = f"""
-<div style="background: #1a1d24; border: 1px solid #2d3139; border-radius: 8px; padding: 1.5rem; margin-top: 0.5rem;">
-
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #2d3139;">
-    <div>
-        <p style="color: #6B7280; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; margin: 0;">Investment Recommendation</p>
-        <p style="color: {rec_color}; font-size: 1.25rem; font-weight: 600; margin: 0.25rem 0 0 0;">{recommendation}</p>
-    </div>
-    <div style="text-align: right;">
-        <p style="color: #6B7280; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; margin: 0;">Model Confidence</p>
-        <p style="color: #E5E7EB; font-size: 1.25rem; font-weight: 600; margin: 0.25rem 0 0 0;">HIGH</p>
-    </div>
-</div>
-
-<div style="margin-bottom: 1.25rem;">
-    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Valuation Summary</p>
-    <p style="color: #D1D5DB; font-size: 0.9rem; line-height: 1.6; margin: 0;">
-        The model values this property at <strong style="color: #fff;">${price:,.0f}</strong>, representing a 
-        <span style="color: {'#00D47E' if price_diff >= 0 else '#FF4757'};">{price_diff_pct:+.1f}%</span> 
-        ({'+' if price_diff >= 0 else ''}{price_diff:,.0f}) deviation from the market baseline of ${base_value:,.0f}. 
-        The valuation is derived from {len(sorted_shap)} key property attributes analyzed via SHAP explainability.
-    </p>
-</div>
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
-    <div>
-        <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Value Drivers (+)</p>
-"""
-    
-    if positive_drivers:
-        for feat, val in positive_drivers[:3]:
-            memo += f"""        <p style="color: #00D47E; font-size: 0.85rem; margin: 0.25rem 0;">{feat.replace('_', ' ').title()}: +${val:,.0f}</p>\n"""
-    else:
-        memo += """        <p style="color: #6B7280; font-size: 0.85rem; margin: 0.25rem 0;">No positive drivers identified</p>\n"""
-    
-    memo += """    </div>
-    <div>
-        <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Value Detractors (-)</p>
-"""
-    
-    if negative_drivers:
-        for feat, val in negative_drivers[:3]:
-            memo += f"""        <p style="color: #FF4757; font-size: 0.85rem; margin: 0.25rem 0;">{feat.replace('_', ' ').title()}: ${val:,.0f}</p>\n"""
-    else:
-        memo += """        <p style="color: #6B7280; font-size: 0.85rem; margin: 0.25rem 0;">No negative drivers identified</p>\n"""
-    
-    memo += f"""    </div>
-</div>
-
-<div style="margin-bottom: 1.25rem; padding: 1rem; background: #12141a; border-radius: 6px;">
-    <p style="color: #9CA3AF; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem 0;">Market Context: {neighborhood}</p>
-    <div style="display: flex; gap: 2rem; margin-bottom: 0.75rem;">
-        <div>
-            <span style="color: #6B7280; font-size: 0.75rem;">Sentiment</span>
-            <p style="color: {'#00D47E' if sentiment == 'Bullish' else '#FF4757' if sentiment == 'Bearish' else '#FFB946'}; font-size: 0.9rem; font-weight: 500; margin: 0.125rem 0 0 0;">{sentiment}</p>
-        </div>
-    </div>
-    <p style="color: #6B7280; font-size: 0.75rem; margin: 0.5rem 0 0.25rem 0;">Recent Developments:</p>
 """
     for news in market_context.get("news", [])[:2]:
         memo += f"""    <p style="color: #9CA3AF; font-size: 0.8rem; margin: 0.2rem 0; padding-left: 0.75rem; border-left: 2px solid #2d3139;">{news}</p>\n"""
