@@ -236,15 +236,27 @@ def get_housing_data() -> pd.DataFrame:
     if parquet_path.exists():
         df = pd.read_parquet(parquet_path)
         
-        # Ensure V2.2 features are present (in case of stale cache)
-        v22_features = ['property_age', 'sqft_per_bedroom', 'is_newer_construction',
-                        'distance_to_downtown_km', 'distance_to_nearest_bart_km', 
-                        'neighborhood_price_tier']
+        # Ensure V3.0 features are present (H3 Spatial Lags + Walk Score)
+        # This fixes KeyError when model expects V3 features but data is stale
+        required_features = [
+            'h3_median_ppsf', 'h3_neighbor_median_ppsf',  # V3.0 H3 Lags
+            'walk_score', 'transit_score'                 # V3.0 Walk Score
+        ]
         
-        missing = [f for f in v22_features if f not in df.columns]
+        missing = [f for f in required_features if f not in df.columns]
+        
         if missing:
+            # Add V2.2 features first (dependencies)
             from src.spatial import add_v2_2_features
             df = add_v2_2_features(df)
+            
+            # Add V3.0 H3 spatial lags
+            from src.spatial import calculate_h3_spatial_lags
+            df = calculate_h3_spatial_lags(df)
+            
+            # Add V3.0 Walk Score (simulated if no API key)
+            from src.external_apis import ensure_walkscore_features
+            df = ensure_walkscore_features(df, use_simulation_fallback=True)
         
         return df
     
