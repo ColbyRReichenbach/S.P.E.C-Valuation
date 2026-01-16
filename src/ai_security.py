@@ -112,18 +112,53 @@ def truncate_to_tokens(
 # 3E.5: TOKEN LIMITS & COST CONTROLS
 # ====================================
 TOKEN_LIMITS = {
-    "gpt-4o-mini": {"input": 8000, "output": 1500},
-    "gpt-4o": {"input": 16000, "output": 2000},
-    "gpt-4-turbo": {"input": 32000, "output": 4000},
-    "gpt-3.5-turbo": {"input": 4000, "output": 1000},
+    # GPT-5 Family
+    "gpt-5.2": {"input": 128000, "output": 8000},
+    "gpt-5": {"input": 128000, "output": 8000},
+    "gpt-5-mini": {"input": 64000, "output": 4000},
+    "gpt-5-nano": {"input": 32000, "output": 2000},  # Cheapest!
+    # GPT-4.1 Family  
+    "gpt-4.1": {"input": 128000, "output": 8000},
+    "gpt-4.1-mini": {"input": 64000, "output": 4000},
+    "gpt-4.1-nano": {"input": 32000, "output": 2000},
+    # GPT-4o Family
+    "gpt-4o-mini": {"input": 128000, "output": 4000},  # Best value!
+    "gpt-4o": {"input": 128000, "output": 8000},
+    # Legacy
+    "gpt-4-turbo": {"input": 128000, "output": 4096},
+    "gpt-3.5-turbo": {"input": 16000, "output": 4096},
 }
 
 TOKEN_COSTS = {
-    # Cost per 1K tokens (input/output) as of Jan 2026
-    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
-    "gpt-4o": {"input": 0.005, "output": 0.015},
+    # Cost per 1M tokens (from OpenAI pricing Jan 2026)
+    # Divided by 1000 to get cost per 1K tokens
+    
+    # GPT-5 Family (prices per 1K tokens)
+    "gpt-5.2": {"input": 0.00175, "output": 0.014},      # $1.75/1M, $14/1M
+    "gpt-5": {"input": 0.00125, "output": 0.010},        # $1.25/1M, $10/1M
+    "gpt-5-mini": {"input": 0.00025, "output": 0.002},   # $0.25/1M, $2/1M
+    "gpt-5-nano": {"input": 0.00005, "output": 0.0004},  # $0.05/1M, $0.40/1M ⭐ CHEAPEST
+    
+    # GPT-4.1 Family
+    "gpt-4.1": {"input": 0.002, "output": 0.008},        # $2/1M, $8/1M
+    "gpt-4.1-mini": {"input": 0.0004, "output": 0.0016}, # $0.40/1M, $1.60/1M
+    "gpt-4.1-nano": {"input": 0.0001, "output": 0.0004}, # $0.10/1M, $0.40/1M
+    
+    # GPT-4o Family
+    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006}, # $0.15/1M, $0.60/1M ⭐ RECOMMENDED
+    "gpt-4o": {"input": 0.0025, "output": 0.010},        # $2.50/1M, $10/1M
+    
+    # Legacy
     "gpt-4-turbo": {"input": 0.01, "output": 0.03},
     "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
+}
+
+# Recommended models by use case
+RECOMMENDED_MODELS = {
+    "production": "gpt-4o-mini",      # Best quality/price ratio
+    "development": "gpt-5-nano",       # Cheapest for testing
+    "high_quality": "gpt-5",           # Best results
+    "budget": "gpt-4.1-nano",          # Very cheap, good quality
 }
 
 
