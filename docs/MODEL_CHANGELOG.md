@@ -413,25 +413,40 @@ log_ai_interaction(
 
 ## Upcoming Changes (Planned)
 
-### V3.0 Completion (In Progress)
-- [x] Phase 3A.1: PPE10/PPE20/MdAPE Metrics ✅
-- [x] Phase 3A.2: Isolation Forest Outlier Detection ✅
-- [x] Phase 3B.1: H3 Spatial Lag Features ✅
-- [x] Phase 3B.2: Walk Score API Integration ✅ (ready for API key)
-- [ ] Phase 3C: OpenAI Activation (needs API key)
-- [x] Phase 3E: AI Security ✅
+### V3.0 ✅ Complete
+- [x] Phase 3A.1: PPE10/PPE20/MdAPE Metrics
+- [x] Phase 3A.2: Isolation Forest Outlier Detection
+- [x] Phase 3B.1: H3 Spatial Lag Features
+- [x] Phase 3B.2: Walk Score Integration (simulation, awaiting API key)
+- [x] Phase 3C: AI Investment Memos (GPT-4o-mini)
+- [x] Phase 3D: Comparable Properties (Comps)
+- [x] Phase 3E: AI Security & Cost Controls
 
-### V4.0 (Future)
-- [ ] Data expansion to 5,000-10,000 records
-- [ ] Cascading Model Architecture (segmented by property tier)
-- [ ] FRED Interest Rate Integration
-- [ ] Multi-provider LLM Routing
-- [ ] **AI Persona Selector** 🆕
-  - Multiple analyst personas: Bearish 🐻 | Neutral ⚖️ | Bullish 🐂
+### V3.1 Hotfixes (Quick Wins)
+- [ ] **Outlier Export**: Save removed outliers to `data/processed/outliers.parquet` with reasons
+- [ ] **Walk Score API Key**: Integrate live API once key is received
+
+### V4.0 (Major Features)
+- [ ] **Data Expansion**: Scale from 1,400 to 5,000-10,000 records
+- [ ] **Map Clustering**: Required for 10K+ markers (Deck.gl clustering)
+- [ ] **Cascading Model Architecture**:
+  - Random Forest classifier to predict property tier (Luxury / Mid / Entry)
+  - 3 separate XGBoost models, one per tier
+  - Segment-specific SHAP baselines (e.g., Luxury baseline = $2.8M, not $1.4M)
+- [ ] **AI Persona Selector**:
+  - Bearish 🐻 / Neutral ⚖️ / Bullish 🐂 analyst personas
   - User-selectable OpenAI model (GPT-4o-mini, GPT-4o, GPT-4.1)
-  - Transparency widget showing recommendation distribution per persona
-  - Research: Run batch analysis on 100+ properties per persona
-  - Goal: Let users choose analysis style that matches their investment philosophy
+  - Transparency widget: "Using Bearish persona: 15% BUY | 45% HOLD | 40% AVOID"
+
+### V5.0 (Web Application Rewrite)
+- [ ] **React/Next.js Frontend**: Replace Streamlit for smoother UX
+- [ ] **FastAPI Backend**: Separate model inference API
+- [ ] **No Full-Page Reloads**: Real-time updates via WebSocket or SSE
+- [ ] **Production Hosting**: Vercel (frontend) + GCP Cloud Run (backend)
+
+> **Why V5.0?** Streamlit re-renders the entire page on every interaction (~300-500ms latency). 
+> For a truly smooth experience, a React frontend with a FastAPI backend is the right architecture.
+> Streamlit is excellent for prototyping; React is for production UX.
 
 ---
 
