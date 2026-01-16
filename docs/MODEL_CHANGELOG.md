@@ -13,7 +13,8 @@
 | V2.1 | 2026-01-14 | 0.68 | $382K | $277K | N/A | N/A | N/A | 4 | 1,400 |
 | V2.2 | 2026-01-14 | 0.898 | $214K | $164K | N/A | N/A | N/A | 10 | 1,400 |
 | V3.0-a | 2026-01-15 | 0.898 | $214K | $164K | 50.7% | 80.0% | 9.8% | 10 | 1,400 |
-| **V3.0-b** | 2026-01-15 | **0.893** | **$193K** | **$145K** | **55.6%** | **85.3%** | **8.8%** | 10 | **1,330** |
+| V3.0-b | 2026-01-15 | 0.893 | $193K | $145K | 55.6% | 85.3% | 8.8% | 10 | 1,330 |
+| **V3.0-c** | 2026-01-15 | **0.937** | **$148K** | **$111K** | **69.2%** 🚀 | **92.5%** | **6.5%** | **14** | 1,330 |
 
 ---
 
@@ -244,13 +245,66 @@ def detect_outliers(df, contamination=0.05):
 
 ---
 
+### V3.0 Phase 3B — H3 Spatial Lag Features
+**Date:** January 15, 2026  
+**Branch:** `v3`
+
+#### What Changed
+Added 4 new H3-based "comparable sales" features that capture neighborhood price context:
+1. `h3_median_ppsf`: Median $/sqft in the same H3 hexagonal cell
+2. `h3_neighbor_median_ppsf`: Weighted median $/sqft of 6 adjacent cells
+3. `h3_listing_density`: Number of active listings in the cell
+4. `h3_price_percentile`: Where this property ranks (0-100) among neighbors
+
+#### Why We Changed It
+Professional appraisers use "comparable sales" — nearby similar properties — to justify valuations.
+H3 hexagonal cells (~0.1 km²) naturally capture this logic:
+- A $2M home in a $3M neighborhood might be undervalued
+- A $1.5M home in a $1M neighborhood might be overvalued
+
+#### How We Implemented It
+```python
+def calculate_h3_spatial_lags(df):
+    # Group by H3 cell, calculate aggregates
+    h3_stats = df.groupby("h3_index").agg({
+        "price_per_sqft": ["median", "count"],
+    })
+    
+    # For each property, get stats from 6 adjacent cells
+    def get_neighbor_median_ppsf(h3_idx):
+        neighbors = h3.grid_disk(h3_idx, 1)  # 6 adjacent cells
+        return weighted_median(neighbors)
+    
+    df["h3_neighbor_median_ppsf"] = df["h3_index"].apply(get_neighbor_median_ppsf)
+```
+
+#### Performance Comparison
+
+| Metric | V3.0-b (10 features) | V3.0-c (14 features) | Change |
+|--------|----------------------|----------------------|--------|
+| Features | 10 | 14 | +4 |
+| R² | 0.893 | **0.937** | **+4.9%** |
+| RMSE | $193,000 | **$148,000** | **-23%** |
+| MAE | $145,000 | **$111,000** | **-24%** |
+| **PPE10** | 55.6% | **69.2%** | **+24%** 🚀 |
+| **PPE20** | 85.3% | **92.5%** | **+8.4%** |
+| **MdAPE** | 8.8% | **6.5%** | **-26%** |
+
+#### Key Insights
+- This was the **single largest improvement** in model history
+- PPE10 jumped from 55.6% to 69.2% — nearly 70% of predictions within ±10%!
+- R² exceeded 0.93 for the first time
+- The "comparable sales" logic is critical for real estate valuation
+
+---
+
 ## Upcoming Changes (Planned)
 
 ### V3.0 Completion (In Progress)
 - [x] Phase 3A.1: PPE10/PPE20/MdAPE Metrics ✅
 - [x] Phase 3A.2: Isolation Forest Outlier Detection ✅
-- [ ] Phase 3B: H3 Spatial Lag Features
-- [ ] Phase 3B: Walk Score API Integration
+- [x] Phase 3B.1: H3 Spatial Lag Features ✅
+- [ ] Phase 3B.2: Walk Score API Integration
 - [ ] Phase 3C: OpenAI Activation
 - [ ] Phase 3E: AI Security (Prompt Injection Prevention)
 

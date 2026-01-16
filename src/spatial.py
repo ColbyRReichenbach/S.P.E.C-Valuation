@@ -488,6 +488,183 @@ def calculate_h3_neighborhood_stats(
 
 
 # ====================================
+# V3.0 H3 SPATIAL LAG FEATURES
+# ====================================
+def calculate_h3_spatial_lags(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate H3-based spatial lag features for the model.
+    
+    Spatial lags capture the "comparable sales" logic that professional
+    appraisers use - the value of a property is influenced by the prices
+    of similar properties in the immediate vicinity.
+    
+    New Features:
+    - h3_median_ppsf: Median price-per-sqft in the same H3 cell
+    - h3_neighbor_median_ppsf: Median price-per-sqft of 6 adjacent H3 cells
+    - h3_listing_density: Count of listings in the same H3 cell
+    - h3_price_percentile: Property's price rank (0-100) within its H3 cell
+    
+    Args:
+        df: DataFrame with 'h3_index', 'price', and 'sqft' columns.
+    
+    Returns:
+        DataFrame with added spatial lag features.
+    """
+    h3 = _get_h3()
+    if h3 is None:
+        logger.warning("H3 library not available. Skipping spatial lag features.")
+        return df
+    
+    df = df.copy()
+    
+    # Ensure h3_index exists
+    if "h3_index" not in df.columns:
+        logger.info("Adding H3 index for spatial lag calculation...")
+        df = add_h3_index(df)
+    
+    # Calculate price per sqft if not present
+    if "price_per_sqft" not in df.columns:
+        df["price_per_sqft"] = df["price"] / df["sqft"].replace(0, np.nan)
+    
+    logger.info("Calculating H3 spatial lag features...")
+    
+    # Step 1: Calculate aggregates per H3 cell
+    h3_stats = df.groupby("h3_index").agg({
+        "price_per_sqft": ["median", "mean", "std", "count"],
+        "price": ["median", "min", "max"],
+    }).reset_index()
+    
+    # Flatten column names
+    h3_stats.columns = [
+        "h3_index", 
+        "h3_median_ppsf", "h3_mean_ppsf", "h3_std_ppsf", "h3_listing_density",
+        "h3_median_price", "h3_min_price", "h3_max_price",
+    ]
+    
+    # Step 2: Merge cell-level stats back to properties
+    df = df.merge(
+        h3_stats[["h3_index", "h3_median_ppsf", "h3_listing_density", "h3_median_price"]],
+        on="h3_index",
+        how="left"
+    )
+    
+    # Step 3: Calculate neighbor aggregates (k=1 ring = 6 adjacent cells)
+    def get_neighbor_median_ppsf(h3_idx):
+        if pd.isna(h3_idx):
+            return np.nan
+        try:
+            # Get the 6 adjacent cells (excluding center)
+            neighbors = list(h3.grid_disk(h3_idx, 1))
+            neighbors.remove(h3_idx)  # Remove the center cell
+            
+            # Get stats for neighbor cells
+            neighbor_stats = h3_stats[h3_stats["h3_index"].isin(neighbors)]
+            
+            if len(neighbor_stats) == 0:
+                return np.nan
+            
+            # Weighted average by listing density
+            total_listings = neighbor_stats["h3_listing_density"].sum()
+            if total_listings == 0:
+                return neighbor_stats["h3_median_ppsf"].median()
+            
+            weighted_ppsf = (
+                neighbor_stats["h3_median_ppsf"] * neighbor_stats["h3_listing_density"]
+            ).sum() / total_listings
+            
+            return weighted_ppsf
+        except Exception:
+            return np.nan
+    
+    df["h3_neighbor_median_ppsf"] = df["h3_index"].apply(get_neighbor_median_ppsf)
+    
+    # Step 4: Calculate price percentile within H3 cell
+    def get_price_percentile(row):
+        if pd.isna(row["h3_index"]):
+            return 50.0  # Default to median
+        
+        cell_prices = df[df["h3_index"] == row["h3_index"]]["price"]
+        if len(cell_prices) <= 1:
+            return 50.0
+        
+        # Calculate percentile rank
+        rank = (cell_prices < row["price"]).sum()
+        percentile = (rank / len(cell_prices)) * 100
+        return percentile
+    
+    df["h3_price_percentile"] = df.apply(get_price_percentile, axis=1)
+    
+    # Fill missing values with dataset medians
+    for col in ["h3_median_ppsf", "h3_neighbor_median_ppsf", "h3_listing_density", "h3_price_percentile"]:
+        if col in df.columns:
+            median_val = df[col].median()
+            df[col] = df[col].fillna(median_val)
+    
+    # Log summary
+    logger.info(f"H3 Spatial Lag Features Added:")
+    logger.info(f"  h3_median_ppsf: median=${df['h3_median_ppsf'].median():,.0f}/sqft")
+    logger.info(f"  h3_neighbor_median_ppsf: median=${df['h3_neighbor_median_ppsf'].median():,.0f}/sqft")
+    logger.info(f"  h3_listing_density: median={df['h3_listing_density'].median():.1f} listings/cell")
+    logger.info(f"  h3_price_percentile: range={df['h3_price_percentile'].min():.0f}-{df['h3_price_percentile'].max():.0f}")
+    
+    return df
+
+
+def create_h3_feature_store(df: pd.DataFrame, output_path: Optional[Path] = None) -> pd.DataFrame:
+    """
+    Create and save H3 aggregate statistics for fast inference.
+    
+    This pre-computes H3 cell statistics so that new properties can be
+    quickly scored without recalculating neighborhood stats.
+    
+    Args:
+        df: DataFrame with property data.
+        output_path: Path to save the feature store (default: data/processed/h3_features.parquet).
+    
+    Returns:
+        DataFrame with H3 cell-level statistics.
+    """
+    from config.settings import PROCESSED_DATA_DIR
+    
+    if output_path is None:
+        output_path = PROCESSED_DATA_DIR / "h3_features.parquet"
+    
+    df = df.copy()
+    
+    # Ensure h3_index exists
+    if "h3_index" not in df.columns:
+        df = add_h3_index(df)
+    
+    # Calculate price per sqft if not present
+    if "price_per_sqft" not in df.columns:
+        df["price_per_sqft"] = df["price"] / df["sqft"].replace(0, np.nan)
+    
+    # Aggregate by H3 cell
+    h3_features = df.groupby("h3_index").agg({
+        "price_per_sqft": ["median", "mean", "std", "count"],
+        "price": ["median", "mean"],
+        "sqft": ["median"],
+        "bedrooms": ["median"],
+    }).reset_index()
+    
+    # Flatten column names
+    h3_features.columns = [
+        "h3_index",
+        "median_ppsf", "mean_ppsf", "std_ppsf", "listing_count",
+        "median_price", "mean_price",
+        "median_sqft",
+        "median_bedrooms",
+    ]
+    
+    # Save to parquet
+    h3_features.to_parquet(output_path, index=False)
+    logger.info(f"H3 feature store saved to {output_path}")
+    logger.info(f"  {len(h3_features)} unique H3 cells with aggregate stats")
+    
+    return h3_features
+
+
+# ====================================
 # VALUATION STATUS & MAP UTILITIES
 # ====================================
 def add_valuation_status(
