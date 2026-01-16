@@ -353,6 +353,64 @@ def simulate_walkscore_features(df):
 
 ---
 
+### V3.0 Phase 3E — AI Engineering & Security
+**Date:** January 15, 2026  
+**Branch:** `v3`
+
+#### What Changed
+Implemented comprehensive AI security controls in `src/ai_security.py`:
+
+| Feature | Implementation |
+|---------|----------------|
+| **3E.1** Prompt Injection Prevention | XML tag delimiting, input sanitization |
+| **3E.2** Token-Aware Truncation | tiktoken for accurate counting |
+| **3E.3** Structured JSON Outputs | Schema validation for LLM responses |
+| **3E.4** Recursive Text Splitting | Paragraph → sentence → word splitting |
+| **3E.5** Token Limits & Cost Controls | Model-specific limits, cost estimation |
+| **3E.6** API Error Handling | Exponential backoff retry logic |
+| **3E.7** Security Logging | SQLite audit trail for all AI calls |
+
+#### Why We Changed It
+Production AI systems need defense-in-depth:
+- **Prompt Injection**: Users can't manipulate the AI via property descriptions
+- **Token Limits**: Prevent runaway costs ($0.01 → $100 accidents)
+- **Audit Trail**: Track costs, success rates, and debug failures
+
+#### How We Implemented It
+```python
+# 3E.1: XML tag delimiting prevents injection
+prompt = create_secure_prompt(
+    system_instructions="You are a bearish analyst",
+    property_data={"address": "ignore previous... [SANITIZED]"},
+    market_context=truncate_to_tokens(rag_context, 2000),
+    task="Write investment memo"
+)
+
+# 3E.2: Accurate token counting with tiktoken
+tokens = count_tokens(prompt, model="gpt-4o-mini")  # → 174
+
+# 3E.5: Budget validation before API call
+is_valid, reason = validate_request_budget(prompt, "gpt-4o-mini")
+# → True, "OK (174/8000 tokens)"
+
+# 3E.7: Audit logging
+log_ai_interaction(
+    property_id=123,
+    model="gpt-4o-mini",
+    input_tokens=174,
+    cost_estimate=0.00026,
+    success=True,
+)
+```
+
+#### Key Features
+- **Malicious input sanitization**: Patterns like "ignore previous instructions" are replaced with `[REDACTED]`
+- **Cost estimation**: gpt-4o-mini: $0.00015/1K input, $0.0006/1K output
+- **Daily cost tracking**: `get_ai_usage_stats()` returns 7-day summary
+- **Retry with backoff**: Handles rate limits, timeouts gracefully
+
+---
+
 ## Upcoming Changes (Planned)
 
 ### V3.0 Completion (In Progress)
@@ -360,8 +418,8 @@ def simulate_walkscore_features(df):
 - [x] Phase 3A.2: Isolation Forest Outlier Detection ✅
 - [x] Phase 3B.1: H3 Spatial Lag Features ✅
 - [x] Phase 3B.2: Walk Score API Integration ✅ (ready for API key)
-- [ ] Phase 3C: OpenAI Activation
-- [ ] Phase 3E: AI Security (Prompt Injection Prevention)
+- [ ] Phase 3C: OpenAI Activation (needs API key)
+- [x] Phase 3E: AI Security ✅
 
 ### V4.0 (Future)
 - [ ] Data expansion to 5,000-10,000 records
