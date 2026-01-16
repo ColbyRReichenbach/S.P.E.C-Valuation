@@ -858,6 +858,74 @@ def create_h3_geojson(
     return {"type": "FeatureCollection", "features": features}
 
 
+# ====================================
+# COMPARABLE SALES (COMPS) - Phase 3D
+# ====================================
+def find_comparable_properties(
+    df: pd.DataFrame,
+    target_property: pd.Series,
+    n_comps: int = 5,
+    sqft_tolerance: float = 0.20,
+    year_tolerance: int = 15,
+) -> pd.DataFrame:
+    """
+    Find comparable properties (comps) for a target property.
+    
+    Similarity criteria:
+    1. Same zip code (required)
+    2. Similar square footage (±20%)
+    3. Same bedroom count (±1)
+    4. Similar year built (±15 years)
+    """
+    target_zip = target_property.get("zip_code")
+    target_sqft = target_property.get("sqft", 1000)
+    target_beds = target_property.get("bedrooms", 2)
+    target_year = target_property.get("year_built", 1970)
+    target_idx = target_property.name if hasattr(target_property, 'name') else None
+    
+    sqft_min = target_sqft * (1 - sqft_tolerance)
+    sqft_max = target_sqft * (1 + sqft_tolerance)
+    year_min = target_year - year_tolerance
+    year_max = target_year + year_tolerance
+    
+    comps = df.copy()
+    
+    if target_idx is not None:
+        comps = comps[comps.index != target_idx]
+    
+    mask = (
+        (comps["zip_code"] == target_zip) &
+        (comps["sqft"] >= sqft_min) & (comps["sqft"] <= sqft_max) &
+        (comps["bedrooms"] >= target_beds - 1) & (comps["bedrooms"] <= target_beds + 1) &
+        (comps["year_built"] >= year_min) & (comps["year_built"] <= year_max)
+    )
+    
+    comps = comps[mask]
+    
+    if len(comps) == 0:
+        comps = df[df["zip_code"] == target_zip].copy()
+        if target_idx is not None:
+            comps = comps[comps.index != target_idx]
+    
+    if len(comps) == 0:
+        return pd.DataFrame()
+    
+    comps["_sqft_diff"] = abs(comps["sqft"] - target_sqft) / target_sqft
+    comps["_bed_diff"] = abs(comps["bedrooms"] - target_beds)
+    comps["_year_diff"] = abs(comps["year_built"] - target_year) / 100
+    
+    comps["similarity_score"] = (
+        comps["_sqft_diff"] * 0.5 +
+        comps["_bed_diff"] * 0.3 +
+        comps["_year_diff"] * 0.2
+    )
+    
+    comps = comps.sort_values("similarity_score").head(n_comps)
+    comps = comps.drop(columns=["_sqft_diff", "_bed_diff", "_year_diff"])
+    
+    return comps
+
+
 if __name__ == "__main__":
     # Test spatial utilities
     print("Testing Spatial Utilities v2.0")

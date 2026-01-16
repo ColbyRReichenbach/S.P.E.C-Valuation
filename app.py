@@ -40,7 +40,7 @@ from config.settings import (
 )
 from src.etl import load_processed_data, run_etl_pipeline, execute_sql_query
 from src.model import ValuationModel, get_model_instance
-from src.spatial import add_valuation_status, prepare_map_data
+from src.spatial import add_valuation_status, prepare_map_data, find_comparable_properties
 from src.oracle import generate_investment_memo
 
 
@@ -867,6 +867,52 @@ def main():
             
             waterfall_chart = create_shap_waterfall(explanation)
             st.plotly_chart(waterfall_chart, use_container_width=True)
+            
+            # ================================
+            # COMPARABLE PROPERTIES (COMPS)
+            # ================================
+            st.markdown("#### Comparable Properties")
+            st.caption("Similar properties in the same area based on size, bedrooms, and age.")
+            
+            comps = find_comparable_properties(df, selected_property, n_comps=5)
+            
+            if len(comps) > 0:
+                # Format comps for display
+                comps_display = comps[["sqft", "bedrooms", "year_built", "price", "model_price", "valuation_status"]].copy()
+                comps_display.columns = ["Sqft", "Beds", "Year", "List Price", "Model Price", "Status"]
+                
+                # Format prices
+                comps_display["List Price"] = comps_display["List Price"].apply(lambda x: f"${x:,.0f}")
+                comps_display["Model Price"] = comps_display["Model Price"].apply(lambda x: f"${x:,.0f}")
+                
+                # Style the status column
+                def style_status(s):
+                    if s == "Undervalued":
+                        return f'<span style="color: #00D47E;">{s}</span>'
+                    elif s == "Overvalued":
+                        return f'<span style="color: #FF4757;">{s}</span>'
+                    return f'<span style="color: #FFB946;">{s}</span>'
+                
+                comps_display["Status"] = comps_display["Status"].apply(style_status)
+                
+                # Display as HTML table for styling
+                st.markdown(
+                    comps_display.to_html(escape=False, index=False),
+                    unsafe_allow_html=True
+                )
+                
+                # Summary stats
+                avg_comp_price = comps["price"].mean()
+                avg_comp_model = comps["model_price"].mean()
+                
+                comp_col1, comp_col2 = st.columns(2)
+                with comp_col1:
+                    st.metric("Avg Comp List Price", f"${avg_comp_price:,.0f}")
+                with comp_col2:
+                    diff = selected_property["price"] - avg_comp_price
+                    st.metric("vs. Selected Property", f"${diff:+,.0f}")
+            else:
+                st.info("No comparable properties found in this zip code.")
             
             # ================================
             # RENOVATION SIMULATOR
