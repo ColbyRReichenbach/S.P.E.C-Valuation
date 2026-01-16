@@ -298,13 +298,68 @@ def calculate_h3_spatial_lags(df):
 
 ---
 
+### V3.0 Phase 3B.2 — Walk Score API Integration
+**Date:** January 15, 2026  
+**Branch:** `v3`
+
+#### What Changed
+Added 3 new walkability features from Walk Score API:
+1. `walk_score`: How walkable is the location? (0-100)
+2. `transit_score`: Public transit access quality (0-100)
+3. `bike_score`: How bikeable is the location? (0-100)
+
+#### Why We Changed It
+Walkability is a significant price factor, especially in urban markets like SF:
+- Walk Score 90+ commands 5-10% premium
+- Transit access reduces need for parking
+- Millennial/Gen-Z buyers prioritize walkable neighborhoods
+
+#### How We Implemented It
+```python
+# src/external_apis.py
+def fetch_walkscore(lat, lon, api_key):
+    response = requests.get(
+        "https://api.walkscore.com/score",
+        params={"lat": lat, "lon": lon, "transit": 1, "bike": 1}
+    )
+    return {
+        "walk_score": response.json()["walkscore"],
+        "transit_score": response.json()["transit"]["score"],
+        "bike_score": response.json()["bike"]["score"],
+    }
+
+# Simulation fallback when no API key
+def simulate_walkscore_features(df):
+    # Uses distance-to-downtown as proxy for walkability
+    df["walk_score"] = 100 - (df["distance_to_downtown_km"] * 8)
+```
+
+#### Performance (With Simulated Data)
+*Note: Using simulated walkability scores based on distance-to-downtown. Real API would provide more unique signal.*
+
+| Metric | V3.0-c (14 features) | V3.0-d (17 features) | Change |
+|--------|----------------------|----------------------|--------|
+| Features | 14 | 17 | +3 |
+| R² | 0.937 | 0.935 | -0.2% |
+| RMSE | $148,000 | $150,000 | +1.3% |
+| **PPE10** | 69.2% | 69.2% | — |
+| **MdAPE** | 6.5% | 6.2% | -4.6% |
+
+#### Key Insights
+- Simulated scores show marginal impact (derived from existing feature)
+- Real Walk Score API would provide unique signal not captured by distance
+- Infrastructure is ready — just add `WALKSCORE_API_KEY` to `.env`
+- Free API key at: https://www.walkscore.com/professional/api-sign-up.php
+
+---
+
 ## Upcoming Changes (Planned)
 
 ### V3.0 Completion (In Progress)
 - [x] Phase 3A.1: PPE10/PPE20/MdAPE Metrics ✅
 - [x] Phase 3A.2: Isolation Forest Outlier Detection ✅
 - [x] Phase 3B.1: H3 Spatial Lag Features ✅
-- [ ] Phase 3B.2: Walk Score API Integration
+- [x] Phase 3B.2: Walk Score API Integration ✅ (ready for API key)
 - [ ] Phase 3C: OpenAI Activation
 - [ ] Phase 3E: AI Security (Prompt Injection Prevention)
 

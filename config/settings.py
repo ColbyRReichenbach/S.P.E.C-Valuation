@@ -144,7 +144,7 @@ MODEL_FEATURES_V2_2: List[str] = [
     "neighborhood_price_tier",
 ]
 
-# V3.0 - With H3 Spatial Lag Features (14 total) - CURRENT
+# V3.0 - With H3 Spatial Lag Features (14 total)
 MODEL_FEATURES_V3: List[str] = [
     # Core (4)
     "sqft",
@@ -159,11 +159,37 @@ MODEL_FEATURES_V3: List[str] = [
     "distance_to_downtown_km",
     "distance_to_nearest_bart_km",
     "neighborhood_price_tier",
-    # Spatial - H3 Lags (4) - V3.0 NEW
+    # Spatial - H3 Lags (4)
     "h3_median_ppsf",            # Median $/sqft in same H3 cell
     "h3_neighbor_median_ppsf",   # Median $/sqft in 6 adjacent cells
     "h3_listing_density",        # Number of listings in H3 cell
     "h3_price_percentile",       # Where this property ranks (0-100)
+]
+
+# V3.0 Full - With Walk Score Features (17 total) - CURRENT
+MODEL_FEATURES_V3_FULL: List[str] = [
+    # Core (4)
+    "sqft",
+    "bedrooms",
+    "year_built",
+    "condition",
+    # Derived (3)
+    "property_age",
+    "sqft_per_bedroom",
+    "is_newer_construction",
+    # Spatial - Distance (3)
+    "distance_to_downtown_km",
+    "distance_to_nearest_bart_km",
+    "neighborhood_price_tier",
+    # Spatial - H3 Lags (4)
+    "h3_median_ppsf",
+    "h3_neighbor_median_ppsf",
+    "h3_listing_density",
+    "h3_price_percentile",
+    # Walk Score API (3) - V3.0 NEW
+    "walk_score",                # Walkability (0-100)
+    "transit_score",             # Public transit access (0-100)
+    "bike_score",                # Bikeability (0-100)
 ]
 
 TARGET_COLUMN: str = "price"
