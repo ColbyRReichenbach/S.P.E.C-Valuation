@@ -195,6 +195,122 @@ def validate_with_pandera(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ====================================
+# OUTLIER DETECTION (V3.0)
+# ====================================
+def detect_outliers(
+    df: pd.DataFrame,
+    features: List[str] = None,
+    contamination: float = 0.05,
+    save_flagged: bool = True,
+) -> pd.DataFrame:
+    """
+    Detect outliers using Isolation Forest algorithm.
+    
+    Uses unsupervised machine learning to identify anomalous records that may be:
+    - Data entry errors (e.g., $100 price, 50000 sqft)
+    - Distressed sales (foreclosures, estate sales)
+    - Luxury outliers that skew the model
+    
+    Args:
+        df: Input DataFrame.
+        features: Columns to use for detection. Defaults to price, sqft, price_per_sqft.
+        contamination: Expected proportion of outliers (0.05 = 5%).
+        save_flagged: If True, save flagged records to CSV for manual review.
+    
+    Returns:
+        DataFrame with 'is_outlier' column added (True = flagged as outlier).
+    """
+    from sklearn.ensemble import IsolationForest
+    
+    # Default features for outlier detection
+    if features is None:
+        features = ["price", "sqft", "bedrooms"]
+        # Add price_per_sqft if it exists or can be calculated
+        if "price" in df.columns and "sqft" in df.columns:
+            df = df.copy()
+            if "price_per_sqft" not in df.columns:
+                df["price_per_sqft"] = df["price"] / df["sqft"].replace(0, np.nan)
+            features.append("price_per_sqft")
+    
+    # Filter to available features
+    available_features = [f for f in features if f in df.columns]
+    
+    if len(available_features) < 2:
+        logger.warning("Not enough features for outlier detection. Skipping.")
+        df["is_outlier"] = False
+        return df
+    
+    logger.info(f"Running Isolation Forest on features: {available_features}")
+    logger.info(f"Contamination rate: {contamination:.1%}")
+    
+    # Prepare data (handle missing values)
+    X = df[available_features].copy()
+    X = X.fillna(X.median())  # Impute missing with median for detection
+    
+    # Fit Isolation Forest
+    iso_forest = IsolationForest(
+        contamination=contamination,
+        random_state=42,
+        n_estimators=100,
+        n_jobs=-1,
+    )
+    
+    # -1 = outlier, 1 = inlier
+    predictions = iso_forest.fit_predict(X)
+    df = df.copy()
+    df["is_outlier"] = predictions == -1
+    
+    # Count and log results
+    n_outliers = df["is_outlier"].sum()
+    n_total = len(df)
+    pct_outliers = n_outliers / n_total * 100
+    
+    logger.info(f"Outlier Detection Results:")
+    logger.info(f"  Total records: {n_total}")
+    logger.info(f"  Flagged outliers: {n_outliers} ({pct_outliers:.1f}%)")
+    
+    # Save flagged records for manual review
+    if save_flagged and n_outliers > 0:
+        outliers_df = df[df["is_outlier"]][["id", "price", "sqft", "bedrooms", "year_built", "condition", "zip_code"]]
+        outliers_path = PROCESSED_DATA_DIR / "outliers.csv"
+        outliers_df.to_csv(outliers_path, index=False)
+        logger.info(f"  Flagged records saved to: {outliers_path}")
+        
+        # Log some examples
+        logger.info("  Sample outliers:")
+        for _, row in outliers_df.head(5).iterrows():
+            logger.info(f"    ID {row['id']}: ${row['price']:,.0f}, {row['sqft']:.0f} sqft, {row['bedrooms']} bed")
+    
+    return df
+
+
+def get_clean_training_data(df: pd.DataFrame, exclude_outliers: bool = True) -> pd.DataFrame:
+    """
+    Get clean data for model training, optionally excluding outliers.
+    
+    Args:
+        df: DataFrame with 'is_outlier' column from detect_outliers().
+        exclude_outliers: If True, remove flagged outliers from training data.
+    
+    Returns:
+        Clean DataFrame for training.
+    """
+    if "is_outlier" not in df.columns:
+        logger.warning("No outlier flags found. Running detection first.")
+        df = detect_outliers(df)
+    
+    if exclude_outliers:
+        n_before = len(df)
+        clean_df = df[~df["is_outlier"]].copy()
+        n_after = len(clean_df)
+        logger.info(f"Excluded {n_before - n_after} outliers. Training on {n_after} records.")
+        return clean_df
+    else:
+        logger.info(f"Including all {len(df)} records (outliers not excluded).")
+        return df.copy()
+
+
+# ====================================
 # DATA IMPUTATION FUNCTIONS
 # ====================================
 def impute_missing_sqft(df: pd.DataFrame) -> pd.DataFrame:

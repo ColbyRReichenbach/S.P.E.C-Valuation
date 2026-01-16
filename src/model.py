@@ -86,6 +86,69 @@ def _setup_mlflow():
 
 
 # ====================================
+# INSTITUTIONAL METRICS (V3.0)
+# ====================================
+def calculate_ppe(y_true: np.ndarray, y_pred: np.ndarray, threshold: float = 0.10) -> float:
+    """
+    Calculate PPE (Percentage of Predictions within Error threshold).
+    
+    The industry gold standard for AVM accuracy. PPE10 (threshold=0.10) measures
+    what percentage of predictions are within ±10% of the actual value.
+    
+    Args:
+        y_true: Actual values
+        y_pred: Predicted values
+        threshold: Error threshold (0.10 = 10%, 0.20 = 20%)
+    
+    Returns:
+        Percentage of predictions within threshold (0-100)
+    """
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    
+    # Avoid division by zero
+    mask = y_true != 0
+    y_true_safe = y_true[mask]
+    y_pred_safe = y_pred[mask]
+    
+    # Calculate absolute percentage error for each prediction
+    ape = np.abs((y_true_safe - y_pred_safe) / y_true_safe)
+    
+    # Count predictions within threshold
+    within_threshold = np.sum(ape <= threshold)
+    
+    return float(within_threshold / len(ape) * 100)
+
+
+def calculate_mdape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Calculate MdAPE (Median Absolute Percentage Error).
+    
+    More robust than MAPE because it uses median instead of mean,
+    making it resistant to outliers (e.g., luxury homes with high errors).
+    
+    Args:
+        y_true: Actual values
+        y_pred: Predicted values
+    
+    Returns:
+        Median absolute percentage error (0-100)
+    """
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    
+    # Avoid division by zero
+    mask = y_true != 0
+    y_true_safe = y_true[mask]
+    y_pred_safe = y_pred[mask]
+    
+    # Calculate absolute percentage error for each prediction
+    ape = np.abs((y_true_safe - y_pred_safe) / y_true_safe) * 100
+    
+    return float(np.median(ape))
+
+
+# ====================================
 # OPTUNA UTILITIES
 # ====================================
 def _get_optuna():
@@ -317,18 +380,26 @@ class ValuationModel:
             y_pred_test = self.model.predict(X_test)
             
             self.metrics = {
+                # Traditional metrics
                 "train_rmse": float(np.sqrt(mean_squared_error(y_train, y_pred_train))),
                 "test_rmse": float(np.sqrt(mean_squared_error(y_test, y_pred_test))),
                 "train_mae": float(mean_absolute_error(y_train, y_pred_train)),
                 "test_mae": float(mean_absolute_error(y_test, y_pred_test)),
                 "train_r2": float(r2_score(y_train, y_pred_train)),
                 "test_r2": float(r2_score(y_test, y_pred_test)),
+                # V3.0 Institutional Metrics
+                "test_ppe10": calculate_ppe(y_test, y_pred_test, threshold=0.10),
+                "test_ppe20": calculate_ppe(y_test, y_pred_test, threshold=0.20),
+                "test_mdape": calculate_mdape(y_test, y_pred_test),
             }
             
             logger.info(f"Training Metrics:")
             logger.info(f"  RMSE (test): ${self.metrics['test_rmse']:,.0f}")
             logger.info(f"  MAE (test): ${self.metrics['test_mae']:,.0f}")
             logger.info(f"  R² (test): {self.metrics['test_r2']:.4f}")
+            logger.info(f"  PPE10 (test): {self.metrics['test_ppe10']:.1f}%")
+            logger.info(f"  PPE20 (test): {self.metrics['test_ppe20']:.1f}%")
+            logger.info(f"  MdAPE (test): {self.metrics['test_mdape']:.1f}%")
             
             # Log metrics to MLflow
             if self._mlflow:
